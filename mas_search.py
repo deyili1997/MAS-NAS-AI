@@ -1,0 +1,339 @@
+"""
+Multi-Agent Neural Architecture Search (MAS)
+=============================================
+4-agent system for NAS on longitudinal EHR Transformer models:
+  Agent 1 (Context):    Gather historical data — dataset similarity, top-k archs, SHAP
+  Agent 2 (Proposal):   LLM-based architecture proposal
+  Agent 3 (Critic):     LLM-based proposal review and revision
+  Agent 4 (Experiment): Finetune accepted architectures, record results
+
+Usage:
+    # With pretrain integrated (no --ckpt_path):
+    python mas_search.py \
+        --hospital MIMIC-IV --task death --max_params 1000000 --budget 10
+
+    # With existing checkpoint:
+    python mas_search.py \
+        --hospital MIMIC-IV --task death --max_params 1000000 --budget 10 \
+        --ckpt_path results/MIMIC-IV/checkpoint_mlm/mlm_model.pt
+"""
+
+import argparse
+import pickle
+
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
+import numpy as np
+import pandas as pd
+import torch
+from pathlib import Path
+from torch.utils.data import DataLoader
+
+from utils.seed import set_random_seed
+from utils.tokenizer import EHRTokenizer
+from utils.dataset import PreTrainEHRDataset, FineTuneEHRDataset, batcher
+from utils.engine import evaluate
+from run_pipeline import build_tokenizer, pretrain, CHOICES
+from model.supernet_transformer import TransformerSuper
+
+from agents import context_agent, proposal_agent, critic_agent, experiment_agent
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description="Multi-Agent NAS for EHR Transformers")
+
+    # Target
+    p.add_argument("--hospital", type=str, required=True, help="Target hospital name")
+    p.add_argument("--task", type=str, required=True,
+                   choices=["death", "stay", "readmission"], help="Downstream task")
+
+    # Constraints
+    p.add_argument("--max_params", type=int, required=True,
+                   help="Maximum subnet parameter count")
+    p.add_argument("--budget", type=int, default=20,
+                   help="Total number of architectures to try")
+
+    # Historical context
+    p.add_argument("--top_k", type=int, default=5,
+                   help="Number of historical best architectures to retrieve")
+    p.add_argument("--results_dir", type=str, default="./results",
+                   help="Directory with past experiment results")
+
+    # Pretrained model (optional — if omitted, pretrain runs automatically)
+    p.add_argument("--ckpt_path", type=str, default=None,
+                   help="Path to pretrained supernet checkpoint (if omitted, pretrain runs first)")
+
+    # Pretrain hyperparams (used only when --ckpt_path is not provided)
+    p.add_argument("--pretrain_epochs", type=int, default=50)
+    p.add_argument("--pretrain_patience", type=int, default=5,
+                   help="Pretrain early stopping patience")
+    # Supernet max dimensions
+    p.add_argument("--embed_dim", type=int, default=256)
+    p.add_argument("--depth", type=int, default=8)
+    p.add_argument("--num_heads", type=int, default=8)
+    p.add_argument("--mlp_ratio", type=float, default=8)
+
+    # LLM settings
+    p.add_argument("--model", type=str, default="claude-sonnet-4-6",
+                   help="Claude model ID for LLM agents")
+
+    # Finetune hyperparams
+    p.add_argument("--finetune_epochs", type=int, default=20)
+    p.add_argument("--finetune_patience", type=int, default=5)
+    p.add_argument("--top_k_epochs", type=int, default=3,
+                   help="Average test metrics from top-k validation epochs")
+    p.add_argument("--batch_size", type=int, default=32)
+    p.add_argument("--lr", type=float, default=1e-4)
+    p.add_argument("--weight_decay", type=float, default=1e-2)
+    p.add_argument("--max_grad_norm", type=float, default=1.0)
+    p.add_argument("--drop_rate", type=float, default=0.1)
+    p.add_argument("--attn_drop_rate", type=float, default=0.1)
+    p.add_argument("--drop_path_rate", type=float, default=0.1)
+
+    p.add_argument("--seed", type=int, default=123)
+
+    return p.parse_args()
+
+
+def _compute_avg_rank(df):
+    """Compute composite average rank (lower = better)."""
+    ranks = pd.DataFrame()
+    for col in ["accuracy", "f1", "auroc", "auprc"]:
+        ranks[col] = df[col].rank(ascending=False, method="average")
+    return ranks.mean(axis=1)
+
+
+def main():
+    args = parse_args()
+    set_random_seed(args.seed)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device: {device}")
+    print(f"Target: {args.hospital} / {args.task}")
+    print(f"Budget: {args.budget} architectures, max_params={args.max_params:,}")
+
+    # --- Load data ---
+    data_root = Path(f"./data_process/{args.hospital}/{args.hospital}-processed")
+    full_data_path = data_root / "mimic.pkl"
+    pretrain_data_path = data_root / "mimic_pretrain.pkl"
+    finetune_data_path = data_root / "mimic_downstream.pkl"
+
+    special_tokens = ["[PAD]", "[CLS]", "[MASK]"]
+    full_data = pickle.load(open(full_data_path, "rb"))
+    tokenizer = build_tokenizer(full_data, special_tokens)
+    max_adm = full_data.groupby("SUBJECT_ID")["HADM_ID"].nunique().max()
+    vocab_size = len(tokenizer.vocab.id2word)
+    print(f"Vocab size: {vocab_size}, max admissions: {max_adm}")
+
+    # --- Pretrain or load checkpoint ---
+    if args.ckpt_path is not None:
+        ckpt_path = args.ckpt_path
+        print(f"Using existing checkpoint: {ckpt_path}")
+    else:
+        print("\nNo checkpoint provided — running pretrain phase first...")
+        pretrain_data = pickle.load(open(pretrain_data_path, "rb"))
+        # pretrain() expects args.output_dir
+        args.output_dir = args.results_dir
+        ckpt_path = pretrain(args, tokenizer, pretrain_data, max_adm, device)
+
+    ckpt = torch.load(ckpt_path, map_location="cpu")
+    print(f"Loaded checkpoint: {ckpt_path}")
+
+    # --- Prepare finetune data ---
+    train_data, val_data, test_data = pickle.load(open(finetune_data_path, "rb"))
+
+    token_type = ["diag", "med", "lab", "pro"]
+    train_dataset = FineTuneEHRDataset(train_data, tokenizer, token_type, max_adm, args.task)
+    val_dataset = FineTuneEHRDataset(val_data, tokenizer, token_type, max_adm, args.task)
+    test_dataset = FineTuneEHRDataset(test_data, tokenizer, token_type, max_adm, args.task)
+
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
+                              collate_fn=batcher(tokenizer, mode="finetune"), shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size,
+                            collate_fn=batcher(tokenizer, mode="finetune"), shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size,
+                             collate_fn=batcher(tokenizer, mode="finetune"), shuffle=False)
+
+    # --- Initialize Anthropic client ---
+    import anthropic
+    client = anthropic.Anthropic()
+
+    # =============================================
+    # Agent 1: Historical Context (runs once)
+    # =============================================
+    context = context_agent.run(
+        hospital=args.hospital,
+        task=args.task,
+        max_params=args.max_params,
+        results_dir=args.results_dir,
+        top_k=args.top_k,
+    )
+
+    # =============================================
+    # Search loop: Agent 2 -> Agent 3 -> Agent 4
+    # =============================================
+    search_state = {
+        "completed_experiments": [],
+        "budget_remaining": args.budget,
+    }
+
+    round_num = 0
+    max_consecutive_failures = 3
+    consecutive_failures = 0
+
+    while search_state["budget_remaining"] > 0:
+        round_num += 1
+        print(f"\n{'='*60}")
+        print(f"Round {round_num} — Budget remaining: {search_state['budget_remaining']}")
+        print(f"{'='*60}")
+
+        # Agent 2: Propose architectures
+        proposals = proposal_agent.propose(
+            context=context,
+            search_state=search_state,
+            max_params=args.max_params,
+            client=client,
+            model=args.model,
+        )
+
+        if not proposals:
+            consecutive_failures += 1
+            print(f"No valid proposals generated. "
+                  f"({consecutive_failures}/{max_consecutive_failures} consecutive failures)")
+            if consecutive_failures >= max_consecutive_failures:
+                print("Too many consecutive failures, stopping search.")
+                break
+            continue
+
+        # Agent 3: Critique proposals
+        reviewed = critic_agent.critique(
+            context=context,
+            search_state=search_state,
+            proposals=proposals,
+            max_params=args.max_params,
+            client=client,
+            vocab_size=vocab_size,
+            max_adm=max_adm,
+            model=args.model,
+        )
+
+        if not reviewed:
+            consecutive_failures += 1
+            print(f"All proposals rejected by critic. "
+                  f"({consecutive_failures}/{max_consecutive_failures} consecutive failures)")
+            if consecutive_failures >= max_consecutive_failures:
+                print("Too many consecutive failures, stopping search.")
+                break
+            continue
+
+        consecutive_failures = 0  # Reset on success
+
+        # Agent 4: Run experiments (val only)
+        search_state = experiment_agent.run_trials(
+            reviewed_proposals=reviewed,
+            search_state=search_state,
+            ckpt=ckpt,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            device=device,
+            args=args,
+            vocab_size=vocab_size,
+            max_adm=max_adm,
+        )
+
+    # =============================================
+    # Save search results (val only)
+    # =============================================
+    print(f"\n{'='*60}")
+    print("Search Complete")
+    print(f"{'='*60}")
+
+    val_results = search_state["completed_experiments"]
+    if not val_results:
+        print("No experiments completed.")
+        return
+
+    df = pd.DataFrame(val_results)
+    df["hospital"] = args.hospital
+    df["task"] = args.task
+
+    # Convert list columns to strings for CSV
+    df["mlp_ratio"] = df["mlp_ratio"].apply(str)
+    df["num_heads"] = df["num_heads"].apply(str)
+
+    # Rank by val metrics
+    val_rank = pd.DataFrame()
+    for col in ["val_accuracy", "val_f1", "val_auroc", "val_auprc"]:
+        val_rank[col] = df[col].rank(ascending=False, method="average")
+    df["avg_rank"] = val_rank.mean(axis=1)
+    df = df.sort_values("avg_rank").reset_index(drop=True)
+
+    # Save all val results
+    output_dir = Path(args.results_dir) / args.hospital
+    output_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = output_dir / f"mas_search_{args.task}.csv"
+    df.to_csv(csv_path, index=False)
+    print(f"\nSaved {len(df)} val results to {csv_path}")
+
+    # Print all architectures ranked by val
+    print(f"\nAll architectures (ranked by val):")
+    display_cols = ["embed_dim", "depth", "num_params",
+                    "val_accuracy", "val_f1", "val_auroc", "val_auprc", "avg_rank"]
+    print(df[display_cols].to_string(index=False))
+
+    # =============================================
+    # Final test evaluation: best architecture only
+    # =============================================
+    best_model_sd = search_state.get("best_model_sd")
+    best_config = search_state.get("best_config")
+    best_proposal = search_state.get("best_proposal", {})
+
+    if best_model_sd is None or best_config is None:
+        print("\nNo best model found, skipping test evaluation.")
+        return
+
+    print(f"\n{'='*60}")
+    print("Final Test Evaluation — Best Architecture by Val AUPRC")
+    print(f"{'='*60}")
+    print(f"  embed_dim={best_proposal.get('embed_dim')}, "
+          f"depth={best_proposal.get('depth')}, "
+          f"params={best_proposal.get('num_params', 0):,}")
+
+    # Build model and load best weights
+    model = TransformerSuper(
+        num_classes=2,
+        vocab_size=ckpt["vocab_size"],
+        embed_dim=ckpt["embed_dim"],
+        mlp_ratio=ckpt["mlp_ratio"],
+        depth=ckpt["depth"],
+        num_heads=ckpt["num_heads"],
+        qkv_bias=True,
+        drop_rate=args.drop_rate,
+        attn_drop_rate=args.attn_drop_rate,
+        drop_path_rate=args.drop_path_rate,
+        pre_norm=True,
+        max_adm_num=ckpt["max_adm_num"],
+    ).to(device)
+    model.load_state_dict(best_model_sd)
+
+    test_metrics = evaluate(test_loader, model, device, retrain_config=best_config)
+
+    print(f"\n  Test Results:")
+    print(f"    Accuracy = {test_metrics['accuracy']:.4f}")
+    print(f"    F1       = {test_metrics['f1']:.4f}")
+    print(f"    AUROC    = {test_metrics['auroc']:.4f}")
+    print(f"    AUPRC    = {test_metrics['auprc']:.4f}")
+
+    # Append test results to CSV
+    best_row = df.iloc[0].to_dict()
+    best_row["test_accuracy"] = test_metrics["accuracy"]
+    best_row["test_f1"] = test_metrics["f1"]
+    best_row["test_auroc"] = test_metrics["auroc"]
+    best_row["test_auprc"] = test_metrics["auprc"]
+    test_csv_path = output_dir / f"mas_best_{args.task}.csv"
+    pd.DataFrame([best_row]).to_csv(test_csv_path, index=False)
+    print(f"\n  Best architecture + test results saved to {test_csv_path}")
+
+
+if __name__ == "__main__":
+    main()
