@@ -175,24 +175,8 @@ def _validate_proposal(proposal):
     return True, "ok"
 
 
-def propose(context, search_state, max_params, client, model="claude-sonnet-4-6"):
-    """
-    Use Claude to propose architectures.
-
-    Args:
-        context: dict from context_agent.run()
-        search_state: dict with completed_experiments and budget_remaining
-        max_params: max parameter count constraint
-        client: anthropic.Anthropic client
-        model: Claude model ID
-
-    Returns:
-        list of proposal dicts, each with embed_dim, depth, mlp_ratio, num_heads, rationale
-    """
-    print("\n[Agent 2: Architecture Proposal]")
-
-    prompt = _build_prompt(context, search_state, max_params)
-
+def _call_llm(prompt, client, model):
+    """Call Claude and parse the response into a list of proposals."""
     response = client.messages.create(
         model=model,
         max_tokens=4096,
@@ -218,7 +202,106 @@ def propose(context, search_state, max_params, client, model="claude-sonnet-4-6"
             print(f"  Proposal {i+1}: embed_dim={prop['embed_dim']}, depth={prop['depth']}, "
                   f"mlp_ratio={prop['mlp_ratio']}, num_heads={prop['num_heads']}")
         else:
-            print(f"  Proposal {i+1} REJECTED: {msg}")
+            print(f"  Proposal {i+1} INVALID: {msg}")
 
     print(f"  {len(valid_proposals)}/{len(proposals)} proposals valid")
     return valid_proposals
+
+
+def propose(context, search_state, max_params, client, model="claude-sonnet-4-6"):
+    """
+    Use Claude to propose new architectures.
+
+    Returns:
+        list of proposal dicts, each with embed_dim, depth, mlp_ratio, num_heads, rationale
+    """
+    print("\n[Agent 2: Architecture Proposal]")
+    prompt = _build_prompt(context, search_state, max_params)
+    return _call_llm(prompt, client, model)
+
+
+def _build_revision_prompt(context, search_state, rejected_with_critiques, max_params):
+    """Build a revision prompt based on critic feedback."""
+    parts = []
+
+    parts.append(
+        "You are an expert neural architecture search agent for Transformer models "
+        "applied to longitudinal Electronic Health Record (EHR) data.\n\n"
+        "Your previous proposals were REJECTED by the critic. "
+        "You must revise them based on the feedback below.\n"
+    )
+
+    # Search space
+    parts.append(f"\n## Search Space\n")
+    parts.append(f"Available choices: {json.dumps(CHOICES)}\n")
+    parts.append(
+        "CONSTRAINT: embed_dim must be divisible by each num_heads value.\n"
+        f"Maximum allowed parameters: {max_params:,}\n"
+    )
+
+    # SHAP importance
+    shap = context.get("shap_importance", {})
+    if shap:
+        parts.append(f"\n## SHAP Feature Importance\n")
+        for feat, val in sorted(shap.items(), key=lambda x: -x[1]):
+            parts.append(f"  {feat}: {val:.4f}\n")
+
+    # Already tried
+    completed = search_state.get("completed_experiments", [])
+    if completed:
+        parts.append(f"\n## Already Tried ({len(completed)} architectures)\n")
+        for exp in completed:
+            parts.append(f"  {json.dumps(exp)}\n")
+
+    # Rejected proposals + critiques
+    parts.append(f"\n## Rejected Proposals & Critique Reasons\n")
+    for i, item in enumerate(rejected_with_critiques):
+        parts.append(f"\n### Rejected Proposal {i+1}\n")
+        parts.append(f"  Config: {json.dumps(item['proposal'])}\n")
+        parts.append(f"  Critique: {item['critique']}\n")
+        parts.append(f"  Risk tags: {item['risk_tags']}\n")
+
+    # Instructions
+    parts.append(
+        "\n## Your Task\n"
+        "For each rejected proposal, provide a REVISED architecture that addresses "
+        "the critique. Make sure the revision:\n"
+        "- Fixes any constraint violations\n"
+        "- Is sufficiently different from already-tried architectures\n"
+        "- Respects the parameter budget\n"
+        "- Addresses the specific feedback from the critic\n\n"
+        "## Output Format\n"
+        "Return a JSON array of revised architecture proposals:\n"
+        "```json\n"
+        "[\n"
+        "  {\n"
+        '    "embed_dim": 128,\n'
+        '    "depth": 4,\n'
+        '    "mlp_ratio": [4, 8, 4, 4],\n'
+        '    "num_heads": [4, 4, 8, 4],\n'
+        '    "rationale": "Revised to address: ..."\n'
+        "  }\n"
+        "]\n"
+        "```\n"
+        "Return ONLY valid JSON, no markdown code fences, no extra text.\n"
+    )
+
+    return "".join(parts)
+
+
+def revise(context, search_state, rejected_with_critiques, max_params, client,
+           model="claude-sonnet-4-6"):
+    """
+    Use Claude to revise rejected proposals based on critic feedback.
+
+    Args:
+        rejected_with_critiques: list of {"proposal": config, "critique": str, "risk_tags": [...]}
+
+    Returns:
+        list of revised proposal dicts
+    """
+    print("\n[Agent 2: Architecture Revision]")
+    print(f"  Revising {len(rejected_with_critiques)} rejected proposals...")
+
+    prompt = _build_revision_prompt(context, search_state, rejected_with_critiques, max_params)
+    return _call_llm(prompt, client, model)

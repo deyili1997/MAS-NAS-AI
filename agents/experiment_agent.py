@@ -169,15 +169,43 @@ def run_trials(reviewed_proposals, search_state, ckpt, train_loader, val_loader,
         }
         search_state["completed_experiments"].append(val_result)
 
-        # Track globally best model (by val AUPRC) for final test eval
-        current_best_auprc = search_state.get("best_val_auprc", -1.0)
-        if avg_val["auprc"] > current_best_auprc:
-            search_state["best_val_auprc"] = avg_val["auprc"]
-            search_state["best_config"] = config
-            search_state["best_proposal"] = arch_info
-            search_state["best_model_sd"] = best_model_sd
+        # Save model state dict temporarily for this experiment
+        search_state.setdefault("_model_sds", []).append(best_model_sd)
+        search_state.setdefault("_configs", []).append(config)
 
         search_state["budget_remaining"] -= 1
 
+    # Recompute composite rank across ALL completed experiments to find global best
+    _update_best_by_composite_rank(search_state)
+
     print(f"\n  Budget remaining: {search_state['budget_remaining']}")
     return search_state
+
+
+def _update_best_by_composite_rank(search_state):
+    """Recompute composite rank across all experiments, update best model."""
+    import pandas as pd
+
+    experiments = search_state["completed_experiments"]
+    if not experiments:
+        return
+
+    df = pd.DataFrame(experiments)
+    val_cols = ["val_accuracy", "val_f1", "val_auroc", "val_auprc"]
+    ranks = pd.DataFrame()
+    for col in val_cols:
+        ranks[col] = df[col].rank(ascending=False, method="average")
+    avg_rank = ranks.mean(axis=1)
+
+    best_idx = avg_rank.idxmin()
+
+    model_sds = search_state.get("_model_sds", [])
+    configs = search_state.get("_configs", [])
+
+    if best_idx < len(model_sds):
+        search_state["best_model_sd"] = model_sds[best_idx]
+        search_state["best_config"] = configs[best_idx]
+        search_state["best_proposal"] = experiments[best_idx]
+        print(f"\n  Best architecture (composite rank): idx={best_idx}, "
+              f"embed_dim={experiments[best_idx]['embed_dim']}, "
+              f"depth={experiments[best_idx]['depth']}")

@@ -205,21 +205,50 @@ def main():
                 break
             continue
 
-        # Agent 3: Critique proposals
-        reviewed = critic_agent.critique(
-            context=context,
-            search_state=search_state,
-            proposals=proposals,
-            max_params=args.max_params,
-            client=client,
-            vocab_size=vocab_size,
-            max_adm=max_adm,
-            model=args.model,
-        )
+        # Agent 2 ↔ Agent 3: Propose-Critique-Revise loop
+        max_revision_rounds = 3
+        all_accepted = []
+
+        for revision_round in range(max_revision_rounds):
+            # Agent 3: Critique
+            accepted, rejected = critic_agent.critique(
+                context=context,
+                search_state=search_state,
+                proposals=proposals,
+                max_params=args.max_params,
+                client=client,
+                vocab_size=vocab_size,
+                max_adm=max_adm,
+                model=args.model,
+            )
+            all_accepted.extend(accepted)
+
+            if not rejected:
+                print(f"  All proposals accepted (revision round {revision_round+1})")
+                break
+
+            if revision_round < max_revision_rounds - 1:
+                # Agent 2: Revise rejected proposals
+                proposals = proposal_agent.revise(
+                    context=context,
+                    search_state=search_state,
+                    rejected_with_critiques=rejected,
+                    max_params=args.max_params,
+                    client=client,
+                    model=args.model,
+                )
+                if not proposals:
+                    print(f"  Revision produced no valid proposals, stopping revision loop")
+                    break
+            else:
+                print(f"  Max revision rounds ({max_revision_rounds}) reached, "
+                      f"dropping {len(rejected)} still-rejected proposals")
+
+        reviewed = all_accepted
 
         if not reviewed:
             consecutive_failures += 1
-            print(f"All proposals rejected by critic. "
+            print(f"No proposals accepted after revision. "
                   f"({consecutive_failures}/{max_consecutive_failures} consecutive failures)")
             if consecutive_failures >= max_consecutive_failures:
                 print("Too many consecutive failures, stopping search.")
@@ -282,22 +311,26 @@ def main():
     print(df[display_cols].to_string(index=False))
 
     # =============================================
-    # Final test evaluation: best architecture only
+    # Final test evaluation: best architecture by composite val rank
     # =============================================
+    # Find the best arch by composite rank (already computed above)
+    best_idx = df["avg_rank"].idxmin()
+    best_row_info = df.iloc[best_idx]
+
+    # Retrieve saved model state dict for this architecture
     best_model_sd = search_state.get("best_model_sd")
     best_config = search_state.get("best_config")
-    best_proposal = search_state.get("best_proposal", {})
 
     if best_model_sd is None or best_config is None:
         print("\nNo best model found, skipping test evaluation.")
         return
 
     print(f"\n{'='*60}")
-    print("Final Test Evaluation — Best Architecture by Val AUPRC")
+    print("Final Test Evaluation — Best Architecture by Composite Val Rank")
     print(f"{'='*60}")
-    print(f"  embed_dim={best_proposal.get('embed_dim')}, "
-          f"depth={best_proposal.get('depth')}, "
-          f"params={best_proposal.get('num_params', 0):,}")
+    print(f"  embed_dim={best_row_info['embed_dim']}, "
+          f"depth={best_row_info['depth']}, "
+          f"params={best_row_info['num_params']:,}")
 
     # Build model and load best weights
     model = TransformerSuper(

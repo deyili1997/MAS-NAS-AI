@@ -5,7 +5,8 @@ Uses Claude API to critique architecture proposals:
 - Validates parameter constraints
 - Checks for redundancy with already-tried architectures
 - Evaluates alignment with SHAP insights
-- Can revise proposals or accept them as-is
+- Returns accepted proposals + rejected proposals with critique reasons
+  (rejected proposals are sent back to Agent 2 for revision)
 """
 
 import json
@@ -29,7 +30,9 @@ def _build_prompt(context, search_state, proposals, max_params):
 
     parts.append(
         "You are an expert architecture critic for Transformer-based NAS on EHR data. "
-        "Your job is to review proposed architectures and either accept or revise them.\n"
+        "Your job is to review proposed architectures and either ACCEPT or REJECT them.\n"
+        "You do NOT revise proposals yourself — rejected proposals will be sent back "
+        "to the proposal agent for revision.\n"
     )
 
     # Search space & constraints
@@ -67,15 +70,16 @@ def _build_prompt(context, search_state, proposals, max_params):
     # Instructions
     parts.append(
         "\n## Your Task\n"
-        "Review each proposal. For each one, decide: accept or revise.\n\n"
+        "Review each proposal. For each one, decide: ACCEPT or REJECT.\n"
+        "Do NOT provide revised configs — just explain what is wrong so the "
+        "proposal agent can fix it.\n\n"
         "Check for:\n"
         "1. Does the architecture respect embed_dim % num_heads == 0 for all layers?\n"
         "2. Is it too similar to an already-tried architecture? (same embed_dim, depth, "
         "and >75% overlap in mlp_ratio/num_heads values)\n"
-        "3. Does it leverage SHAP insights? (if depth has high importance, "
-        "is the proposal exploring depth variation?)\n"
+        "3. Does it leverage SHAP insights? (if a feature has high importance, "
+        "is the proposal exploring variation in that dimension?)\n"
         "4. Is the proposal diverse enough relative to other proposals in this batch?\n\n"
-        "If revising, provide a corrected config that satisfies all constraints.\n\n"
         "## Output Format\n"
         "Return a JSON array. Each element:\n"
         "```json\n"
@@ -83,16 +87,14 @@ def _build_prompt(context, search_state, proposals, max_params):
         "  {\n"
         '    "proposal_idx": 0,\n'
         '    "decision": "accept",\n'
-        '    "revised_config": null,\n'
         '    "critique": "Looks good, explores high-SHAP depth dimension",\n'
         '    "risk_tags": []\n'
         "  },\n"
         "  {\n"
         '    "proposal_idx": 1,\n'
-        '    "decision": "revise",\n'
-        '    "revised_config": {"embed_dim": 128, "depth": 4, "mlp_ratio": [4,4,8,4], "num_heads": [4,4,4,4]},\n'
-        '    "critique": "Original had embed_dim=64 with num_heads=8, changed to valid combo",\n'
-        '    "risk_tags": ["constraint_violation"]\n'
+        '    "decision": "reject",\n'
+        '    "critique": "embed_dim=64 with num_heads=8 is valid but too similar to already-tried arch #3. Also ignores high-SHAP mlp_ratio dimension.",\n'
+        '    "risk_tags": ["too_similar", "ignores_shap"]\n'
         "  }\n"
         "]\n"
         "```\n"
@@ -143,24 +145,16 @@ def critique(context, search_state, proposals, max_params, client,
     """
     Use Claude to critique architecture proposals.
 
-    Args:
-        context: dict from context_agent.run()
-        search_state: dict with completed_experiments and budget_remaining
-        proposals: list of proposal dicts from proposal_agent
-        max_params: max parameter count
-        client: anthropic.Anthropic client
-        vocab_size: vocabulary size for param counting
-        max_adm: max admissions for param counting
-        model: Claude model ID
-
     Returns:
-        list of accepted/revised proposal dicts (only configs that passed critique)
+        (accepted, rejected_with_critiques)
+        - accepted: list of config dicts ready for Agent 4
+        - rejected_with_critiques: list of {"proposal": config, "critique": str, "risk_tags": [...]}
     """
     print("\n[Agent 3: Proposal Critic]")
 
     if not proposals:
         print("  No proposals to critique.")
-        return []
+        return [], []
 
     prompt = _build_prompt(context, search_state, proposals, max_params)
 
@@ -180,30 +174,52 @@ def critique(context, search_state, proposals, max_params, client,
         print(f"  Response: {response_text[:500]}")
         # Fall back: accept all proposals as-is
         print("  Falling back: accepting all proposals without critique")
-        return proposals
+        accepted = []
+        for prop in proposals:
+            config = {"embed_dim": prop["embed_dim"], "depth": prop["depth"],
+                      "mlp_ratio": prop["mlp_ratio"], "num_heads": prop["num_heads"]}
+            accepted.append(config)
+        return accepted, []
 
     # Process critiques
-    reviewed = []
+    accepted = []
+    rejected_with_critiques = []
+
     for crit in critiques:
         idx = crit.get("proposal_idx", -1)
         decision = crit.get("decision", "accept")
-        revised = crit.get("revised_config")
         critique_text = crit.get("critique", "")
         risk_tags = crit.get("risk_tags", [])
 
-        if decision == "revise" and revised:
-            config = revised
-            source = "revised"
-        elif 0 <= idx < len(proposals):
-            config = proposals[idx]
-            source = "accepted"
-        else:
+        if not (0 <= idx < len(proposals)):
             print(f"  Critique for invalid index {idx}, skipping")
             continue
 
-        # Final validation
+        proposal = proposals[idx]
+        config = {
+            "embed_dim": proposal["embed_dim"],
+            "depth": proposal["depth"],
+            "mlp_ratio": proposal["mlp_ratio"],
+            "num_heads": proposal["num_heads"],
+        }
+
+        if decision == "reject":
+            print(f"  Proposal {idx} [REJECTED]: {critique_text[:80]}  tags={risk_tags}")
+            rejected_with_critiques.append({
+                "proposal": config,
+                "critique": critique_text,
+                "risk_tags": risk_tags,
+            })
+            continue
+
+        # Accept — do final validation
         if not _validate_config(config):
-            print(f"  Proposal {idx} ({source}): INVALID config, skipping")
+            print(f"  Proposal {idx} [ACCEPTED] by LLM but [INVALID] config, rejecting")
+            rejected_with_critiques.append({
+                "proposal": config,
+                "critique": "Invalid config: constraint violation detected by validator",
+                "risk_tags": ["constraint_violation"],
+            })
             continue
 
         # Check param count if vocab_size is known
@@ -216,19 +232,16 @@ def critique(context, search_state, proposals, max_params, client,
             }
             n_params = count_subnet_params(internal_config, vocab_size, max_adm=max_adm)
             if n_params > max_params:
-                print(f"  Proposal {idx} ({source}): {n_params:,} params > {max_params:,}, skipping")
+                print(f"  Proposal {idx} accepted by LLM but {n_params:,} > {max_params:,}, rejecting")
+                rejected_with_critiques.append({
+                    "proposal": config,
+                    "critique": f"Exceeds parameter budget: {n_params:,} > {max_params:,}",
+                    "risk_tags": ["too_large"],
+                })
                 continue
 
-        print(f"  Proposal {idx} ({source}): {critique_text[:80]}  tags={risk_tags}")
+        print(f"  Proposal {idx} [ACCEPTED]: {critique_text[:80]}")
+        accepted.append(config)
 
-        # Strip rationale, keep only config keys
-        final = {
-            "embed_dim": config["embed_dim"],
-            "depth": config["depth"],
-            "mlp_ratio": config["mlp_ratio"],
-            "num_heads": config["num_heads"],
-        }
-        reviewed.append(final)
-
-    print(f"  {len(reviewed)}/{len(proposals)} proposals passed critique")
-    return reviewed
+    print(f"  {len(accepted)} [ACCEPTED], {len(rejected_with_critiques)} [REJECTED]")
+    return accepted, rejected_with_critiques
