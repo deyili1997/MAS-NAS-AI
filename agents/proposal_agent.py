@@ -8,6 +8,7 @@ Uses Claude API to propose transformer architectures based on:
 """
 
 import json
+import time
 
 CHOICES = {
     "mlp_ratio": [2, 4, 8],
@@ -169,13 +170,23 @@ def _validate_proposal(proposal):
     return True, "ok"
 
 
-def _call_llm(prompt, client, model):
+def _call_llm(prompt, client, model, max_retries=5):
     """Call Claude and parse the response into a list of proposals."""
-    response = client.messages.create(
-        model=model,
-        max_tokens=4096,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    for attempt in range(max_retries):
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=4096,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            break
+        except Exception as e:
+            if attempt < max_retries - 1:
+                wait = 2 ** attempt
+                print(f"  API error: {e}. Retrying in {wait}s...")
+                time.sleep(wait)
+            else:
+                raise
 
     response_text = response.content[0].text
     print(f"  Raw LLM response length: {len(response_text)} chars")

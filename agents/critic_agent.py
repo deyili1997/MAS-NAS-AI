@@ -12,6 +12,7 @@ Uses Claude API to critique architecture proposals:
 import json
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from run_pipeline import count_subnet_params
@@ -155,11 +156,22 @@ def critique(context, search_state, proposals, max_params, client,
 
     prompt = _build_prompt(context, search_state, proposals, max_params)
 
-    response = client.messages.create(
-        model=model,
-        max_tokens=4096,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=4096,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            break
+        except Exception as e:
+            if attempt < max_retries - 1:
+                wait = 2 ** attempt
+                print(f"  API error: {e}. Retrying in {wait}s...")
+                time.sleep(wait)
+            else:
+                raise
 
     response_text = response.content[0].text
     print(f"  Raw LLM response length: {len(response_text)} chars")
