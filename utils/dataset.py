@@ -156,7 +156,7 @@ class FineTuneEHRDataset(PreTrainEHRDataset):
                     # note that one patient records are transformed into multiple samples
                     # one sample represents all previous admissions until the current admission
                     hadm_records[hadm_id] = list(patient)
-                    labels[hadm_id] = [row["DEATH"], row["STAY_DAYS"], row["READMISSION"]]
+                    labels[hadm_id] = [row["DEATH"], row["STAY_DAYS"], row["READMISSION_3M"]]
             return hadm_records, labels
 
         self.records, self.labels = _transform_finetune_data(ehr_finetune_data)

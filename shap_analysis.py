@@ -4,12 +4,11 @@ SHAP Analysis of Architecture Features (per hospital × task)
 For each (hospital, task) group:
 1. Compute composite target = average rank across accuracy, f1, auroc, auprc
    (lower rank = better, rank 1 = best)
-2. Train XGBoost on 4 architecture features: embed_dim, depth, avg_mlp_ratio, avg_num_heads
+2. Train XGBoost on 4 architecture features: embed_dim, depth, mlp_ratio, num_heads
 3. Compute SHAP values and save plots + CSV
 """
 
 import argparse
-import ast
 import glob
 import os
 
@@ -24,7 +23,7 @@ from pathlib import Path
 
 
 METRIC_COLS = ["accuracy", "f1", "auroc", "auprc"]
-ARCH_COLS = ["embed_dim", "depth", "avg_mlp_ratio", "avg_num_heads"]
+ARCH_COLS = ["embed_dim", "depth", "mlp_ratio", "num_heads"]
 
 
 def parse_args():
@@ -48,16 +47,11 @@ def load_metadata(results_dir: str) -> pd.DataFrame:
     return df
 
 
-def _parse_list_col(series):
-    """Parse a string-encoded list column (e.g. '[2, 4]') into lists."""
-    return series.apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else x)
-
-
 def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Add avg_mlp_ratio and avg_num_heads columns."""
+    """Ensure mlp_ratio and num_heads are numeric (they are already scalars)."""
     df = df.copy()
-    df["avg_mlp_ratio"] = _parse_list_col(df["mlp_ratio"]).apply(np.mean)
-    df["avg_num_heads"] = _parse_list_col(df["num_heads"]).apply(np.mean)
+    df["mlp_ratio"] = pd.to_numeric(df["mlp_ratio"])
+    df["num_heads"] = pd.to_numeric(df["num_heads"])
     return df
 
 
@@ -137,8 +131,10 @@ def main():
             print(f"  [{group_name}] skipped — only {len(group)} samples (need >= 5)")
             continue
 
-        # Compute composite target (average rank, lower = better)
-        y = compute_avg_rank(group)
+        # Compute composite target: negate avg_rank so higher = better performance
+        # This way positive SHAP = feature improves performance
+        avg_rank = compute_avg_rank(group)
+        y = -avg_rank
 
         X = group[ARCH_COLS].copy()
 

@@ -38,7 +38,8 @@ def _build_prompt(context, search_state, proposals, max_params):
     # Search space & constraints
     parts.append(f"\n## Search Space\n{json.dumps(CHOICES)}\n")
     parts.append(
-        "CONSTRAINT: embed_dim must be divisible by each num_heads value.\n"
+        "All four values (embed_dim, depth, mlp_ratio, num_heads) are scalars.\n"
+        "CONSTRAINT: embed_dim must be divisible by num_heads.\n"
         f"Maximum parameters: {max_params:,}\n"
     )
 
@@ -74,9 +75,9 @@ def _build_prompt(context, search_state, proposals, max_params):
         "Do NOT provide revised configs — just explain what is wrong so the "
         "proposal agent can fix it.\n\n"
         "Check for:\n"
-        "1. Does the architecture respect embed_dim % num_heads == 0 for all layers?\n"
+        "1. Does the architecture respect embed_dim % num_heads == 0?\n"
         "2. Is it too similar to an already-tried architecture? (same embed_dim, depth, "
-        "and >75% overlap in mlp_ratio/num_heads values)\n"
+        "mlp_ratio, and num_heads)\n"
         "3. Does it leverage SHAP insights? (if a feature has high importance, "
         "is the proposal exploring variation in that dimension?)\n"
         "4. Is the proposal diverse enough relative to other proposals in this batch?\n\n"
@@ -120,23 +121,19 @@ def _validate_config(config):
     """Validate a config dict."""
     embed_dim = config.get("embed_dim")
     depth = config.get("depth")
-    mlp_ratio = config.get("mlp_ratio", [])
-    num_heads = config.get("num_heads", [])
+    mlp_ratio = config.get("mlp_ratio")
+    num_heads = config.get("num_heads")
 
     if embed_dim not in CHOICES["embed_dim"]:
         return False
     if depth not in CHOICES["depth"]:
         return False
-    if len(mlp_ratio) != depth or len(num_heads) != depth:
+    if mlp_ratio not in CHOICES["mlp_ratio"]:
         return False
-    for mr in mlp_ratio:
-        if mr not in CHOICES["mlp_ratio"]:
-            return False
-    for nh in num_heads:
-        if nh not in CHOICES["num_heads"]:
-            return False
-        if embed_dim % nh != 0:
-            return False
+    if num_heads not in CHOICES["num_heads"]:
+        return False
+    if embed_dim % num_heads != 0:
+        return False
     return True
 
 
@@ -214,7 +211,7 @@ def critique(context, search_state, proposals, max_params, client,
 
         # Accept — do final validation
         if not _validate_config(config):
-            print(f"  Proposal {idx} [ACCEPTED] by LLM but [INVALID] config, rejecting")
+            print(f"  Proposal {idx} [ACCEPTED] by LLM but [INVALID] config, [REJECTED]")
             rejected_with_critiques.append({
                 "proposal": config,
                 "critique": "Invalid config: constraint violation detected by validator",
@@ -227,12 +224,12 @@ def critique(context, search_state, proposals, max_params, client,
             internal_config = {
                 "embed_dim": [config["embed_dim"]] * config["depth"],
                 "layer_num": config["depth"],
-                "mlp_ratio": config["mlp_ratio"],
-                "num_heads": config["num_heads"],
+                "mlp_ratio": [config["mlp_ratio"]] * config["depth"],
+                "num_heads": [config["num_heads"]] * config["depth"],
             }
             n_params = count_subnet_params(internal_config, vocab_size, max_adm=max_adm)
             if n_params > max_params:
-                print(f"  Proposal {idx} accepted by LLM but {n_params:,} > {max_params:,}, rejecting")
+                print(f"  Proposal {idx} [ACCEPTED] by LLM but {n_params:,} > {max_params:,}, [REJECTED]")
                 rejected_with_critiques.append({
                     "proposal": config,
                     "critique": f"Exceeds parameter budget: {n_params:,} > {max_params:,}",

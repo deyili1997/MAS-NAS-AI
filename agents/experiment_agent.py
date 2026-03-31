@@ -23,13 +23,13 @@ from model.supernet_transformer import TransformerSuper
 
 
 def _to_internal_config(proposal):
-    """Convert proposal dict to the internal config format expected by the model."""
+    """Convert proposal dict (scalars) to the internal config format (per-layer lists)."""
     depth = proposal["depth"]
     return {
         "embed_dim": [proposal["embed_dim"]] * depth,
         "layer_num": depth,
-        "mlp_ratio": list(proposal["mlp_ratio"]),
-        "num_heads": list(proposal["num_heads"]),
+        "mlp_ratio": [proposal["mlp_ratio"]] * depth,
+        "num_heads": [proposal["num_heads"]] * depth,
     }
 
 

@@ -267,7 +267,7 @@ def finetune_and_evaluate(args, tokenizer, train_data, val_data, test_data,
         elif task == "stay":
             labels = (train_data["STAY_DAYS"] > 7).astype(float).values
         elif task == "readmission":
-            labels = train_data["READMISSION"].astype(float).values
+            labels = train_data["READMISSION_3M"].astype(float).values
         counts = np.bincount(labels.astype(int))
         probs = counts / counts.sum()
         probs = probs[probs > 0]
@@ -286,7 +286,11 @@ def finetune_and_evaluate(args, tokenizer, train_data, val_data, test_data,
                                  collate_fn=batcher(tokenizer, mode="finetune"), shuffle=False)
 
         for arch_idx, config in enumerate(sampled_configs):
-            print(f"\n  Arch {arch_idx+1}/{args.num_archs}: {config}")
+            print(f"\n  Arch {arch_idx+1}/{args.num_archs}: "
+                  f"embed_dim={config['embed_dim'][0]}, "
+                  f"depth={config['layer_num']}, "
+                  f"mlp_ratio={config['mlp_ratio'][0]}, "
+                  f"num_heads={config['num_heads'][0]}")
 
             # build fresh model and load pretrained weights
             model = TransformerSuper(
@@ -369,8 +373,8 @@ def finetune_and_evaluate(args, tokenizer, train_data, val_data, test_data,
                 "arch_idx": arch_idx,
                 "embed_dim": config["embed_dim"][0],
                 "depth": config["layer_num"],
-                "mlp_ratio": str(config["mlp_ratio"]),
-                "num_heads": str(config["num_heads"]),
+                "mlp_ratio": config["mlp_ratio"][0],
+                "num_heads": config["num_heads"][0],
                 "num_params": count_subnet_params(config, vocab_size, num_classes=2, max_adm=max_adm),
                 "accuracy": avg_test["accuracy"],
                 "f1": avg_test["f1"],

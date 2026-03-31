@@ -31,12 +31,12 @@ def _build_prompt(context, search_state, max_params):
     parts.append("## Search Space\n")
     parts.append(f"Available choices: {json.dumps(CHOICES)}\n")
     parts.append(
-        "Each architecture is defined by:\n"
-        "- embed_dim: one value from [64, 128, 256], constant across all layers\n"
+        "Each architecture is defined by four scalar hyperparameters:\n"
+        "- embed_dim: one value from [64, 128, 256]\n"
         "- depth: number of transformer layers, from [2, 4, 8]\n"
-        "- mlp_ratio: a list of length=depth, each element from [2, 4, 8]\n"
-        "- num_heads: a list of length=depth, each element from [2, 4, 8]\n\n"
-        "CONSTRAINT: embed_dim must be divisible by each num_heads value.\n"
+        "- mlp_ratio: one value from [2, 4, 8], constant across all layers\n"
+        "- num_heads: one value from [2, 4, 8], constant across all layers\n\n"
+        "CONSTRAINT: embed_dim must be divisible by num_heads.\n"
         "  Valid combos: embed_dim=64 -> num_heads in [2,4,8]\n"
         "                embed_dim=128 -> num_heads in [2,4,8]\n"
         "                embed_dim=256 -> num_heads in [2,4,8]\n"
@@ -120,8 +120,8 @@ def _build_prompt(context, search_state, max_params):
         "  {\n"
         '    "embed_dim": 128,\n'
         '    "depth": 4,\n'
-        '    "mlp_ratio": [4, 8, 4, 4],\n'
-        '    "num_heads": [4, 4, 8, 4],\n'
+        '    "mlp_ratio": 4,\n'
+        '    "num_heads": 4,\n'
         '    "rationale": "Brief explanation of why this architecture"\n'
         "  }\n"
         "]\n"
@@ -152,25 +152,19 @@ def _validate_proposal(proposal):
     """Basic validation of a single proposal."""
     embed_dim = proposal.get("embed_dim")
     depth = proposal.get("depth")
-    mlp_ratio = proposal.get("mlp_ratio", [])
-    num_heads = proposal.get("num_heads", [])
+    mlp_ratio = proposal.get("mlp_ratio")
+    num_heads = proposal.get("num_heads")
 
     if embed_dim not in CHOICES["embed_dim"]:
         return False, f"embed_dim {embed_dim} not in {CHOICES['embed_dim']}"
     if depth not in CHOICES["depth"]:
         return False, f"depth {depth} not in {CHOICES['depth']}"
-    if len(mlp_ratio) != depth:
-        return False, f"mlp_ratio length {len(mlp_ratio)} != depth {depth}"
-    if len(num_heads) != depth:
-        return False, f"num_heads length {len(num_heads)} != depth {depth}"
-    for i, mr in enumerate(mlp_ratio):
-        if mr not in CHOICES["mlp_ratio"]:
-            return False, f"mlp_ratio[{i}]={mr} not in {CHOICES['mlp_ratio']}"
-    for i, nh in enumerate(num_heads):
-        if nh not in CHOICES["num_heads"]:
-            return False, f"num_heads[{i}]={nh} not in {CHOICES['num_heads']}"
-        if embed_dim % nh != 0:
-            return False, f"embed_dim {embed_dim} not divisible by num_heads[{i}]={nh}"
+    if mlp_ratio not in CHOICES["mlp_ratio"]:
+        return False, f"mlp_ratio {mlp_ratio} not in {CHOICES['mlp_ratio']}"
+    if num_heads not in CHOICES["num_heads"]:
+        return False, f"num_heads {num_heads} not in {CHOICES['num_heads']}"
+    if embed_dim % num_heads != 0:
+        return False, f"embed_dim {embed_dim} not divisible by num_heads={num_heads}"
 
     return True, "ok"
 
@@ -235,7 +229,8 @@ def _build_revision_prompt(context, search_state, rejected_with_critiques, max_p
     parts.append(f"\n## Search Space\n")
     parts.append(f"Available choices: {json.dumps(CHOICES)}\n")
     parts.append(
-        "CONSTRAINT: embed_dim must be divisible by each num_heads value.\n"
+        "All four values (embed_dim, depth, mlp_ratio, num_heads) are scalars.\n"
+        "CONSTRAINT: embed_dim must be divisible by num_heads.\n"
         f"Maximum allowed parameters: {max_params:,}\n"
     )
 
@@ -277,8 +272,8 @@ def _build_revision_prompt(context, search_state, rejected_with_critiques, max_p
         "  {\n"
         '    "embed_dim": 128,\n'
         '    "depth": 4,\n'
-        '    "mlp_ratio": [4, 8, 4, 4],\n'
-        '    "num_heads": [4, 4, 8, 4],\n'
+        '    "mlp_ratio": 4,\n'
+        '    "num_heads": 4,\n'
         '    "rationale": "Revised to address: ..."\n'
         "  }\n"
         "]\n"

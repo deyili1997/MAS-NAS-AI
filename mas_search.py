@@ -1,11 +1,13 @@
 """
 Multi-Agent Neural Architecture Search (MAS)
 =============================================
-4-agent system for NAS on longitudinal EHR Transformer models:
-  Agent 1 (Context):    Gather historical data — dataset similarity, top-k archs, SHAP
-  Agent 2 (Proposal):   LLM-based architecture proposal
-  Agent 3 (Critic):     LLM-based proposal review and revision
-  Agent 4 (Experiment): Finetune accepted architectures, record results
+3-agent system for NAS on longitudinal EHR Transformer models:
+  Agent 1 (Proposal):   LLM-based architecture proposal
+  Agent 2 (Critic):     LLM-based proposal review and revision
+  Agent 3 (Experiment): Finetune accepted architectures, record results
+
+Historical context (dataset similarity, top-k archs, SHAP) is gathered
+directly in the orchestration layer before the search loop begins.
 
 Usage:
     # With pretrain integrated (no --ckpt_path):
@@ -19,6 +21,8 @@ Usage:
 """
 
 import argparse
+import glob
+import os
 import pickle
 
 from dotenv import load_dotenv
@@ -28,6 +32,7 @@ import numpy as np
 import pandas as pd
 import torch
 from pathlib import Path
+from sklearn.metrics.pairwise import cosine_similarity
 from torch.utils.data import DataLoader
 
 from utils.seed import set_random_seed
@@ -36,8 +41,214 @@ from utils.dataset import PreTrainEHRDataset, FineTuneEHRDataset, batcher
 from utils.engine import evaluate
 from run_pipeline import build_tokenizer, pretrain, CHOICES
 from model.supernet_transformer import TransformerSuper
+from dataset_summary import summarize_dataset
 
-from agents import context_agent, proposal_agent, critic_agent, experiment_agent
+from agents import proposal_agent, critic_agent, experiment_agent
+
+
+# ---------------------------------------------------------------------------
+# Historical context helpers (dataset similarity, top-k archs, SHAP)
+# ---------------------------------------------------------------------------
+
+METRIC_COLS = ["accuracy", "f1", "auroc", "auprc"]
+
+SUMMARY_FEATURE_COLS = [
+    "Pretrain_num_samples", "Pretrain_diag_num", "Pretrain_med_num",
+    "Pretrain_lab_num", "Pretrain_pro_num", "Pretrain_avg_num_encounters",
+    "Pretrain_avg_diag_per_patient", "Pretrain_avg_med_per_patient",
+    "Pretrain_avg_lab_per_patient", "Pretrain_avg_pro_per_patient",
+    "Finetune_num_samples", "Finetune_diag_num", "Finetune_med_num",
+    "Finetune_lab_num", "Finetune_pro_num", "Finetune_avg_num_encounters",
+    "Finetune_avg_diag_per_patient", "Finetune_avg_med_per_patient",
+    "Finetune_avg_lab_per_patient", "Finetune_avg_pro_per_patient",
+]
+
+
+def _compute_target_summary(hospital):
+    """Compute dataset summary features for the target hospital."""
+    data_root = Path(f"./data_process/{hospital}/{hospital}-processed")
+    pretrain_path = data_root / "mimic_pretrain.pkl"
+    downstream_path = data_root / "mimic_downstream.pkl"
+
+    pretrain_df = pickle.load(open(pretrain_path, "rb"))
+    pretrain_stats = summarize_dataset(pretrain_df, "Pretrain")
+
+    train_df, _, _ = pickle.load(open(downstream_path, "rb"))
+    finetune_stats = summarize_dataset(train_df, "Finetune")
+
+    return {"hospital": hospital, **pretrain_stats, **finetune_stats}
+
+
+def _load_historical_summaries(results_dir):
+    """Load all dataset_summary.csv files from results/*/."""
+    pattern = os.path.join(results_dir, "*", "dataset_summary.csv")
+    files = sorted(glob.glob(pattern))
+    if not files:
+        return pd.DataFrame()
+    dfs = [pd.read_csv(f) for f in files]
+    return pd.concat(dfs, ignore_index=True)
+
+
+def _find_most_similar_hospital(target_summary, historical_df):
+    """Find the most similar hospital by cosine similarity on summary features."""
+    target_hospital = target_summary["hospital"]
+
+    candidates = historical_df[historical_df["hospital"] != target_hospital].copy()
+    if candidates.empty:
+        candidates = historical_df.copy()
+
+    target_vec = np.array([[target_summary.get(c, 0) for c in SUMMARY_FEATURE_COLS]])
+    candidate_vecs = candidates[SUMMARY_FEATURE_COLS].fillna(0).values
+
+    sims = cosine_similarity(target_vec, candidate_vecs)[0]
+    best_idx = np.argmax(sims)
+    best_hospital = candidates.iloc[best_idx]["hospital"]
+    best_score = sims[best_idx]
+
+    return best_hospital, float(best_score)
+
+
+def _context_compute_avg_rank(group):
+    """Rank architectures by each metric (higher=better), return avg rank."""
+    ranks = pd.DataFrame()
+    for col in METRIC_COLS:
+        ranks[col] = group[col].rank(ascending=False, method="average")
+    return ranks.mean(axis=1).values
+
+
+def _get_top_k_archs(metadata_df, hospital, task, max_params, top_k):
+    """Get top-k architectures from the most similar hospital."""
+    hosp_df = metadata_df[metadata_df["hospital"] == hospital].copy()
+    if hosp_df.empty:
+        return [], task
+
+    task_df = hosp_df[hosp_df["task"] == task]
+    matched_task = task
+
+    if task_df.empty:
+        available_tasks = hosp_df["task"].unique()
+        if len(available_tasks) == 0:
+            return [], task
+
+        task_entropies = hosp_df.groupby("task")["label_entropy"].median()
+        target_entropy = 0.5
+        if "label_entropy" in hosp_df.columns:
+            diffs = (task_entropies - target_entropy).abs()
+            matched_task = diffs.idxmin()
+        else:
+            matched_task = available_tasks[0]
+
+        task_df = hosp_df[hosp_df["task"] == matched_task]
+        print(f"  [Context] Task '{task}' not found for {hospital}, "
+              f"falling back to '{matched_task}'")
+
+    if "num_params" in task_df.columns:
+        task_df = task_df[task_df["num_params"] <= max_params]
+
+    if task_df.empty:
+        return [], matched_task
+
+    task_df = task_df.reset_index(drop=True)
+    task_df["avg_rank"] = _context_compute_avg_rank(task_df)
+    task_df = task_df.sort_values("avg_rank").head(top_k)
+
+    archs = []
+    for _, row in task_df.iterrows():
+        arch = {
+            "embed_dim": int(row["embed_dim"]),
+            "depth": int(row["depth"]),
+            "mlp_ratio": int(row["mlp_ratio"]),
+            "num_heads": int(row["num_heads"]),
+            "num_params": int(row["num_params"]) if "num_params" in row else None,
+            "accuracy": float(row["accuracy"]),
+            "f1": float(row["f1"]),
+            "auroc": float(row["auroc"]),
+            "auprc": float(row["auprc"]),
+        }
+        archs.append(arch)
+
+    return archs, matched_task
+
+
+def _load_shap_importance(results_dir, hospital, task):
+    """Load mean |SHAP| values for the given hospital+task."""
+    shap_path = Path(results_dir) / "shap_analysis" / hospital / task / "mean_abs_shap.csv"
+    if not shap_path.exists():
+        print(f"  [Context] No SHAP data at {shap_path}")
+        return {}
+
+    df = pd.read_csv(shap_path, index_col=0, header=None)
+    return {str(k): float(v) for k, v in zip(df.index, df.iloc[:, 0])}
+
+
+def gather_historical_context(hospital, task, max_params, results_dir, top_k):
+    """
+    Gather historical context for the target hospital and task.
+
+    Returns dict with target_summary, similar_hospital, similarity_score,
+    matched_task, top_k_archs, shap_importance.
+    """
+    print("\n[Historical Context]")
+
+    print(f"  Computing dataset summary for {hospital}...")
+    target_summary = _compute_target_summary(hospital)
+    print(f"  Target summary: {target_summary}")
+
+    historical_df = _load_historical_summaries(results_dir)
+
+    if historical_df.empty:
+        print("  No historical data found — starting cold (no prior experiments)")
+        return {
+            "target_summary": target_summary,
+            "similar_hospital": None,
+            "similarity_score": 0.0,
+            "matched_task": task,
+            "top_k_archs": [],
+            "shap_importance": {},
+        }
+
+    similar_hospital, sim_score = _find_most_similar_hospital(target_summary, historical_df)
+    print(f"  Most similar hospital: {similar_hospital} (cosine sim = {sim_score:.4f})")
+
+    if similar_hospital is None:
+        return {
+            "target_summary": target_summary,
+            "similar_hospital": None,
+            "similarity_score": 0.0,
+            "matched_task": task,
+            "top_k_archs": [],
+            "shap_importance": {},
+        }
+
+    metadata_pattern = os.path.join(results_dir, "*", "metadata.csv")
+    metadata_files = sorted(glob.glob(metadata_pattern))
+    if metadata_files:
+        metadata_df = pd.concat([pd.read_csv(f) for f in metadata_files], ignore_index=True)
+    else:
+        metadata_df = pd.DataFrame()
+
+    top_k_archs, matched_task = _get_top_k_archs(
+        metadata_df, similar_hospital, task, max_params, top_k
+    )
+    print(f"  Retrieved {len(top_k_archs)} top architectures from {similar_hospital}/{matched_task}")
+
+    shap_importance = _load_shap_importance(results_dir, similar_hospital, matched_task)
+    if shap_importance:
+        print(f"  SHAP importance: {shap_importance}")
+    else:
+        print("  No SHAP data available")
+
+    return {
+        "target_summary": target_summary,
+        "similar_hospital": similar_hospital,
+        "similarity_score": sim_score,
+        "matched_task": matched_task,
+        "top_k_archs": top_k_archs,
+        "shap_importance": shap_importance,
+    }
+
+
+# ---------------------------------------------------------------------------
 
 
 def parse_args():
@@ -159,9 +370,9 @@ def main():
     client = anthropic.Anthropic()
 
     # =============================================
-    # Agent 1: Historical Context (runs once)
+    # Historical Context (runs once)
     # =============================================
-    context = context_agent.run(
+    context = gather_historical_context(
         hospital=args.hospital,
         task=args.task,
         max_params=args.max_params,
@@ -285,10 +496,6 @@ def main():
     df = pd.DataFrame(val_results)
     df["hospital"] = args.hospital
     df["task"] = args.task
-
-    # Convert list columns to strings for CSV
-    df["mlp_ratio"] = df["mlp_ratio"].apply(str)
-    df["num_heads"] = df["num_heads"].apply(str)
 
     # Rank by val metrics
     val_rank = pd.DataFrame()

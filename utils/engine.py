@@ -11,15 +11,16 @@ from tqdm import tqdm
 def sample_configs(choices: dict):
 
     config = {}
-    dimensions = ['mlp_ratio', 'num_heads']
     depth = random.choice(choices['depth'])
-    for dimension in dimensions:
-        # 这里mlp_ratio和num_heads是每一层独立采样的
-        config[dimension] = [random.choice(choices[dimension]) for _ in range(depth)]
 
-    # 注意，这里所有层的 embed_dim 都是相同的
-    config['embed_dim'] = [random.choice(choices['embed_dim'])]*depth
+    # All four hyperparameters are scalars; expand to per-layer lists for the model
+    embed_dim = random.choice(choices['embed_dim'])
+    mlp_ratio = random.choice(choices['mlp_ratio'])
+    num_heads = random.choice(choices['num_heads'])
 
+    config['embed_dim'] = [embed_dim] * depth
+    config['mlp_ratio'] = [mlp_ratio] * depth
+    config['num_heads'] = [num_heads] * depth
     config['layer_num'] = depth
     return config
 
