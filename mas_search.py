@@ -2,9 +2,9 @@
 Multi-Agent Neural Architecture Search (MAS)
 =============================================
 3-agent system for NAS on longitudinal EHR Transformer models:
-  Agent 1 (Proposal):   LLM-based architecture proposal
+  Agent 1 (Proposal):   LLM-based architecture proposal (guided by search strategy)
   Agent 2 (Critic):     LLM-based proposal review and revision
-  Agent 3 (Experiment): Finetune accepted architectures, record results
+  Agent 3 (Experiment): Finetune accepted architectures + LLM-based strategy decision
 
 Historical context (dataset similarity, top-k archs, SHAP) is gathered
 directly in the orchestration layer before the search loop begins.
@@ -381,12 +381,15 @@ def main():
     )
 
     # =============================================
-    # Search loop: Agent 2 -> Agent 3 -> Agent 4
+    # Search loop: Agent 1 (Proposal) -> Agent 2 (Critic) -> Agent 3 (Experiment + Strategy)
     # =============================================
     search_state = {
         "completed_experiments": [],
         "budget_remaining": args.budget,
     }
+
+    # First round always starts with exploration
+    strategy = {"strategy": "exploration", "rationale": "initial round"}
 
     round_num = 0
     max_consecutive_failures = 3
@@ -395,16 +398,18 @@ def main():
     while search_state["budget_remaining"] > 0:
         round_num += 1
         print(f"\n{'='*60}")
-        print(f"Round {round_num} — Budget remaining: {search_state['budget_remaining']}")
+        print(f"Round {round_num} — Budget remaining: {search_state['budget_remaining']} "
+              f"— Strategy: {strategy['strategy']}")
         print(f"{'='*60}")
 
-        # Agent 2: Propose architectures
+        # Agent 1: Propose architectures
         proposals = proposal_agent.propose(
             context=context,
             search_state=search_state,
             max_params=args.max_params,
             client=client,
             model=args.model,
+            strategy=strategy,
         )
 
         if not proposals:
@@ -416,12 +421,12 @@ def main():
                 break
             continue
 
-        # Agent 2 ↔ Agent 3: Propose-Critique-Revise loop
+        # Agent 1 ↔ Agent 2: Propose-Critique-Revise loop
         max_revision_rounds = 3
         all_accepted = []
 
         for revision_round in range(max_revision_rounds):
-            # Agent 3: Critique
+            # Agent 2: Critique
             accepted, rejected = critic_agent.critique(
                 context=context,
                 search_state=search_state,
@@ -431,6 +436,7 @@ def main():
                 vocab_size=vocab_size,
                 max_adm=max_adm,
                 model=args.model,
+                strategy=strategy,
             )
             all_accepted.extend(accepted)
 
@@ -439,7 +445,7 @@ def main():
                 break
 
             if revision_round < max_revision_rounds - 1:
-                # Agent 2: Revise rejected proposals
+                # Agent 1: Revise rejected proposals
                 proposals = proposal_agent.revise(
                     context=context,
                     search_state=search_state,
@@ -447,6 +453,7 @@ def main():
                     max_params=args.max_params,
                     client=client,
                     model=args.model,
+                    strategy=strategy,
                 )
                 if not proposals:
                     print(f"  Revision produced no valid proposals, stopping revision loop")
@@ -468,7 +475,7 @@ def main():
 
         consecutive_failures = 0  # Reset on success
 
-        # Agent 4: Run experiments (val only)
+        # Agent 3: Run experiments (val only)
         search_state = experiment_agent.run_trials(
             reviewed_proposals=reviewed,
             search_state=search_state,
@@ -480,6 +487,15 @@ def main():
             vocab_size=vocab_size,
             max_adm=max_adm,
         )
+
+        # Agent 3: Decide strategy for next round
+        if search_state["budget_remaining"] > 0:
+            strategy = experiment_agent.decide_strategy(
+                context=context,
+                search_state=search_state,
+                client=client,
+                model=args.model,
+            )
 
     # =============================================
     # Save search results (val only)

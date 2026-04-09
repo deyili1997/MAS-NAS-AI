@@ -1,7 +1,8 @@
 """
-Agent 2: Architecture Proposal (LLM-based)
+Agent 1: Architecture Proposal (LLM-based)
 ============================================
 Uses Claude API to propose transformer architectures based on:
+- Search strategy (exploration or exploitation, set by Agent 3)
 - Historical context (dataset similarity, top-k archs, SHAP importance)
 - Current search state (tried archs + results)
 - Computational constraint (max_params)
@@ -18,7 +19,7 @@ CHOICES = {
 }
 
 
-def _build_prompt(context, search_state, max_params):
+def _build_prompt(context, search_state, max_params, strategy=None):
     """Build the proposal prompt for Claude."""
     parts = []
 
@@ -107,10 +108,25 @@ def _build_prompt(context, search_state, max_params):
     budget_remaining = search_state.get("budget_remaining", 0)
     parts.append(f"\n## Budget Remaining: {budget_remaining} architectures\n")
     parts.append(
-        "\nDecide how many architectures to propose (at least 1, at most budget_remaining). "
-        "Early in the search, propose more diverse architectures (exploration). "
-        "Later, propose architectures similar to the best performers (exploitation).\n"
+        "\nDecide how many architectures to propose (at least 1, at most budget_remaining).\n"
     )
+
+    # Search strategy
+    if strategy:
+        strat = strategy.get("strategy", "exploration")
+        rationale = strategy.get("rationale", "")
+        parts.append(
+            f"\n## Search Strategy (set by the Strategy Agent)\n"
+            f"Current strategy: **{strat}**\n"
+        )
+        if rationale:
+            parts.append(f"Rationale: {rationale}\n")
+        parts.append(
+            "\n- When strategy is \"exploration\": propose diverse architectures covering "
+            "different regions of the search space. Vary the most important SHAP features.\n"
+            "- When strategy is \"exploitation\": propose architectures similar to the best "
+            "performers, with small targeted variations to refine performance.\n"
+        )
 
     # Output format
     parts.append(
@@ -143,7 +159,17 @@ def _parse_proposals(response_text):
         lines = [l for l in lines if not l.strip().startswith("```")]
         text = "\n".join(lines)
 
-    proposals = json.loads(text)
+    try:
+        proposals = json.loads(text)
+    except json.JSONDecodeError:
+        # LLM may have added preamble text — extract the JSON array
+        start = text.find("[")
+        end = text.rfind("]")
+        if start != -1 and end != -1 and end > start:
+            proposals = json.loads(text[start:end + 1])
+        else:
+            raise
+
     if not isinstance(proposals, list):
         proposals = [proposals]
     return proposals
@@ -206,6 +232,8 @@ def _call_llm(prompt, client, model, max_retries=5):
             valid_proposals.append(prop)
             print(f"  Proposal {i+1}: embed_dim={prop['embed_dim']}, depth={prop['depth']}, "
                   f"mlp_ratio={prop['mlp_ratio']}, num_heads={prop['num_heads']}")
+            if prop.get("rationale"):
+                print(f"    Rationale: {prop['rationale']}")
         else:
             print(f"  Proposal {i+1} INVALID: {msg}")
 
@@ -213,19 +241,22 @@ def _call_llm(prompt, client, model, max_retries=5):
     return valid_proposals
 
 
-def propose(context, search_state, max_params, client, model="claude-sonnet-4-6"):
+def propose(context, search_state, max_params, client, model="claude-sonnet-4-6",
+            strategy=None):
     """
     Use Claude to propose new architectures.
 
     Returns:
         list of proposal dicts, each with embed_dim, depth, mlp_ratio, num_heads, rationale
     """
-    print("\n[Agent 2: Architecture Proposal]")
-    prompt = _build_prompt(context, search_state, max_params)
+    strat_name = strategy.get("strategy", "exploration") if strategy else "exploration"
+    print(f"\n[Agent 1: Architecture Proposal] (strategy={strat_name})")
+    prompt = _build_prompt(context, search_state, max_params, strategy=strategy)
     return _call_llm(prompt, client, model)
 
 
-def _build_revision_prompt(context, search_state, rejected_with_critiques, max_params):
+def _build_revision_prompt(context, search_state, rejected_with_critiques, max_params,
+                           strategy=None):
     """Build a revision prompt based on critic feedback."""
     parts = []
 
@@ -267,6 +298,17 @@ def _build_revision_prompt(context, search_state, rejected_with_critiques, max_p
         parts.append(f"  Critique: {item['critique']}\n")
         parts.append(f"  Risk tags: {item['risk_tags']}\n")
 
+    # Strategy
+    if strategy:
+        strat = strategy.get("strategy", "exploration")
+        rationale = strategy.get("rationale", "")
+        parts.append(f"\n## Current Search Strategy: {strat}\n")
+        if rationale:
+            parts.append(f"Rationale: {rationale}\n")
+        parts.append(
+            "Keep the revisions aligned with this strategy.\n"
+        )
+
     # Instructions
     parts.append(
         "\n## Your Task\n"
@@ -296,7 +338,7 @@ def _build_revision_prompt(context, search_state, rejected_with_critiques, max_p
 
 
 def revise(context, search_state, rejected_with_critiques, max_params, client,
-           model="claude-sonnet-4-6"):
+           model="claude-sonnet-4-6", strategy=None):
     """
     Use Claude to revise rejected proposals based on critic feedback.
 
@@ -306,8 +348,9 @@ def revise(context, search_state, rejected_with_critiques, max_params, client,
     Returns:
         list of revised proposal dicts
     """
-    print("\n[Agent 2: Architecture Revision]")
+    print("\n[Agent 1: Architecture Revision]")
     print(f"  Revising {len(rejected_with_critiques)} rejected proposals...")
 
-    prompt = _build_revision_prompt(context, search_state, rejected_with_critiques, max_params)
+    prompt = _build_revision_prompt(context, search_state, rejected_with_critiques, max_params,
+                                    strategy=strategy)
     return _call_llm(prompt, client, model)

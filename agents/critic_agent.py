@@ -1,12 +1,13 @@
 """
-Agent 3: Proposal Critic (LLM-based)
+Agent 2: Proposal Critic (LLM-based)
 ======================================
 Uses Claude API to critique architecture proposals:
 - Validates parameter constraints
 - Checks for redundancy with already-tried architectures
 - Evaluates alignment with SHAP insights
+- Adjusts review criteria based on current search strategy (exploration/exploitation)
 - Returns accepted proposals + rejected proposals with critique reasons
-  (rejected proposals are sent back to Agent 2 for revision)
+  (rejected proposals are sent back to Agent 1 for revision)
 """
 
 import json
@@ -25,7 +26,7 @@ CHOICES = {
 }
 
 
-def _build_prompt(context, search_state, proposals, max_params):
+def _build_prompt(context, search_state, proposals, max_params, strategy=None):
     """Build the critique prompt for Claude."""
     parts = []
 
@@ -68,6 +69,22 @@ def _build_prompt(context, search_state, proposals, max_params):
     parts.append(f"\n## Proposals to Review\n")
     for i, prop in enumerate(proposals):
         parts.append(f"  Proposal {i}: {json.dumps(prop)}\n")
+
+    # Strategy
+    if strategy:
+        strat = strategy.get("strategy", "exploration")
+        rationale = strategy.get("rationale", "")
+        parts.append(f"\n## Current Search Strategy: {strat}\n")
+        if rationale:
+            parts.append(f"Rationale: {rationale}\n")
+        parts.append(
+            "\nAdjust your review criteria based on the strategy:\n"
+            "- During \"exploration\": be more tolerant of proposals that differ from "
+            "historical best architectures. Prioritize diversity and coverage of the "
+            "search space. Reject only for hard constraint violations or exact duplicates.\n"
+            "- During \"exploitation\": be more tolerant of proposals similar to the best "
+            "performers. Reject proposals that deviate too far from the proven good region.\n"
+        )
 
     # Instructions
     parts.append(
@@ -115,7 +132,14 @@ def _parse_critiques(response_text):
         lines = text.split("\n")
         lines = [l for l in lines if not l.strip().startswith("```")]
         text = "\n".join(lines)
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("[")
+        end = text.rfind("]")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(text[start:end + 1])
+        raise
 
 
 def _validate_config(config):
@@ -139,7 +163,7 @@ def _validate_config(config):
 
 
 def critique(context, search_state, proposals, max_params, client,
-             vocab_size=None, max_adm=8, model="claude-sonnet-4-6"):
+             vocab_size=None, max_adm=8, model="claude-sonnet-4-6", strategy=None):
     """
     Use Claude to critique architecture proposals.
 
@@ -148,13 +172,13 @@ def critique(context, search_state, proposals, max_params, client,
         - accepted: list of config dicts ready for Agent 4
         - rejected_with_critiques: list of {"proposal": config, "critique": str, "risk_tags": [...]}
     """
-    print("\n[Agent 3: Proposal Critic]")
+    print("\n[Agent 2: Proposal Critic]")
 
     if not proposals:
         print("  No proposals to critique.")
         return [], []
 
-    prompt = _build_prompt(context, search_state, proposals, max_params)
+    prompt = _build_prompt(context, search_state, proposals, max_params, strategy=strategy)
 
     max_retries = 5
     for attempt in range(max_retries):
@@ -223,7 +247,7 @@ def critique(context, search_state, proposals, max_params, client,
 
         # Accept — do final validation
         if not _validate_config(config):
-            print(f"  Proposal {idx} [ACCEPTED] by LLM but [INVALID] config, [REJECTED]")
+            print(f"  Proposal {idx} [REJECTED] because [INVALID] config (but [ACCEPTED] by LLM)")
             rejected_with_critiques.append({
                 "proposal": config,
                 "critique": "Invalid config: constraint violation detected by validator",
@@ -241,7 +265,7 @@ def critique(context, search_state, proposals, max_params, client,
             }
             n_params = count_subnet_params(internal_config, vocab_size, max_adm=max_adm)
             if n_params > max_params:
-                print(f"  Proposal {idx} [ACCEPTED] by LLM but {n_params:,} > {max_params:,}, [REJECTED]")
+                print(f"  Proposal {idx} [REJECTED] because {n_params:,} > {max_params:,} (but [ACCEPTED] by LLM)")
                 rejected_with_critiques.append({
                     "proposal": config,
                     "critique": f"Exceeds parameter budget: {n_params:,} > {max_params:,}",

@@ -1,14 +1,16 @@
 """
-Agent 4: Experiment Manager (Algorithmic)
-==========================================
-Runs accepted architecture proposals through the finetune pipeline:
-1. Validate configs (embed_dim % num_heads, param count)
-2. Load pretrained weights, finetune with early stopping + top-k averaging (val only)
-3. Record val results and update search state
-4. Save best model weights for final test evaluation
+Agent 3: Experiment Manager + Strategy Decision
+=================================================
+Dual role:
+  1. (Algorithmic) Run finetune experiments for accepted proposals, record val results,
+     and track the globally best model for final test evaluation.
+  2. (LLM-based) After each round of experiments, analyze results and decide the
+     search strategy ("exploration" or "exploitation") for the next round.
 """
 
 import copy
+import json
+import time
 
 import numpy as np
 import torch
@@ -209,3 +211,122 @@ def _update_best_by_composite_rank(search_state):
         print(f"\n  Best architecture (composite rank): idx={best_idx}, "
               f"embed_dim={experiments[best_idx]['embed_dim']}, "
               f"depth={experiments[best_idx]['depth']}")
+
+
+# ---------------------------------------------------------------------------
+# Strategy Decision (LLM-based)
+# ---------------------------------------------------------------------------
+
+def _build_strategy_prompt(context, search_state):
+    """Build prompt for the strategy decision."""
+    parts = []
+
+    parts.append(
+        "You are a search strategy agent for Neural Architecture Search on EHR Transformer models. "
+        "Your job is to decide whether the next round of architecture proposals should focus on "
+        "EXPLORATION (diverse, covering unexplored regions) or EXPLOITATION (refining around the "
+        "best-performing architectures found so far).\n"
+    )
+
+    # Historical top-k architectures
+    top_k = context.get("top_k_archs", [])
+    if top_k:
+        parts.append("\n## Historical Best Architectures (from similar hospital)\n")
+        for i, arch in enumerate(top_k):
+            parts.append(f"  Top-{i+1}: {json.dumps(arch)}\n")
+
+    # SHAP importance
+    shap = context.get("shap_importance", {})
+    if shap:
+        parts.append("\n## SHAP Feature Importance\n")
+        parts.append("These show which architecture features matter most for performance:\n")
+        for feat, val in sorted(shap.items(), key=lambda x: -x[1]):
+            parts.append(f"  {feat}: {val:.4f}\n")
+
+    # Completed experiments
+    completed = search_state.get("completed_experiments", [])
+    if completed:
+        parts.append(f"\n## Completed Experiments ({len(completed)} architectures)\n")
+        for exp in completed:
+            parts.append(f"  {json.dumps(exp)}\n")
+
+    # Budget
+    budget = search_state.get("budget_remaining", 0)
+    parts.append(f"\n## Budget Remaining: {budget} architectures\n")
+
+    # Decision criteria
+    parts.append(
+        "\n## Decision Guidelines\n"
+        "Choose EXPLORATION when:\n"
+        "- Few experiments completed so far (search space not well covered)\n"
+        "- Results are similar across tried architectures (no clear winner yet)\n"
+        "- Important SHAP features have not been sufficiently varied\n"
+        "- Budget is still large relative to search space\n\n"
+        "Choose EXPLOITATION when:\n"
+        "- A clear best-performing region has emerged\n"
+        "- Budget is running low — focus on refining the best candidates\n"
+        "- High-SHAP features have a clear optimal range from the data\n\n"
+    )
+
+    # Output format
+    parts.append(
+        "## Output Format\n"
+        "Return a JSON object:\n"
+        '{"strategy": "exploration" or "exploitation", "rationale": "brief explanation"}\n\n'
+        "Return ONLY valid JSON, no extra text.\n"
+    )
+
+    return "".join(parts)
+
+
+def decide_strategy(context, search_state, client, model="claude-sonnet-4-6"):
+    """
+    Use Claude to decide the search strategy for the next round.
+
+    Returns:
+        dict with "strategy" ("exploration" or "exploitation") and "rationale"
+    """
+    print("\n[Agent 3: Strategy Decision]")
+
+    prompt = _build_strategy_prompt(context, search_state)
+
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=1024,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            break
+        except Exception as e:
+            if attempt < max_retries - 1:
+                wait = 2 ** attempt
+                print(f"  API error: {e}. Retrying in {wait}s...")
+                time.sleep(wait)
+            else:
+                raise
+
+    text = response.content[0].text.strip()
+
+    try:
+        result = json.loads(text)
+    except json.JSONDecodeError:
+        # Extract JSON object from response
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            result = json.loads(text[start:end + 1])
+        else:
+            print(f"  Failed to parse strategy response, defaulting to exploration")
+            return {"strategy": "exploration", "rationale": "parse failure fallback"}
+
+    strategy = result.get("strategy", "exploration")
+    if strategy not in ("exploration", "exploitation"):
+        strategy = "exploration"
+    rationale = result.get("rationale", "")
+
+    print(f"  Strategy: {strategy}")
+    print(f"  Rationale: {rationale}")
+
+    return {"strategy": strategy, "rationale": rationale}
