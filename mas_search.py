@@ -262,6 +262,10 @@ def parse_args():
     # Constraints
     p.add_argument("--max_params", type=int, required=True,
                    help="Maximum subnet parameter count")
+    p.add_argument("--max_flops", type=int, default=None,
+                   help="Maximum subnet FLOPs (computed at --seq_len reference length)")
+    p.add_argument("--seq_len", type=int, default=512,
+                   help="Reference sequence length for FLOPs estimation")
     p.add_argument("--budget", type=int, default=20,
                    help="Total number of architectures to try")
 
@@ -410,6 +414,7 @@ def main():
             client=client,
             model=args.model,
             strategy=strategy,
+            max_flops=args.max_flops,
         )
 
         if not proposals:
@@ -437,6 +442,8 @@ def main():
                 max_adm=max_adm,
                 model=args.model,
                 strategy=strategy,
+                max_flops=args.max_flops,
+                seq_len=args.seq_len,
             )
             all_accepted.extend(accepted)
 
@@ -454,6 +461,7 @@ def main():
                     client=client,
                     model=args.model,
                     strategy=strategy,
+                    max_flops=args.max_flops,
                 )
                 if not proposals:
                     print(f"  Revision produced no valid proposals, stopping revision loop")

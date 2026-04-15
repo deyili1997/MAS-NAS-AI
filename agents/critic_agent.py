@@ -16,7 +16,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from run_pipeline import count_subnet_params
+from run_pipeline import count_subnet_params, count_subnet_flops
 
 CHOICES = {
     "mlp_ratio": [2, 4, 8],
@@ -26,7 +26,8 @@ CHOICES = {
 }
 
 
-def _build_prompt(context, search_state, proposals, max_params, strategy=None):
+def _build_prompt(context, search_state, proposals, max_params, strategy=None,
+                  max_flops=None):
     """Build the critique prompt for Claude."""
     parts = []
 
@@ -44,6 +45,8 @@ def _build_prompt(context, search_state, proposals, max_params, strategy=None):
         "CONSTRAINT: embed_dim must be divisible by num_heads.\n"
         f"Maximum parameters: {max_params:,}\n"
     )
+    if max_flops is not None:
+        parts.append(f"Maximum FLOPs (reference seq_len): {max_flops:,}\n")
 
     # Historical context
     top_k = context.get("top_k_archs", [])
@@ -163,7 +166,8 @@ def _validate_config(config):
 
 
 def critique(context, search_state, proposals, max_params, client,
-             vocab_size=None, max_adm=8, model="claude-sonnet-4-6", strategy=None):
+             vocab_size=None, max_adm=8, model="claude-sonnet-4-6", strategy=None,
+             max_flops=None, seq_len=512):
     """
     Use Claude to critique architecture proposals.
 
@@ -178,7 +182,8 @@ def critique(context, search_state, proposals, max_params, client,
         print("  No proposals to critique.")
         return [], []
 
-    prompt = _build_prompt(context, search_state, proposals, max_params, strategy=strategy)
+    prompt = _build_prompt(context, search_state, proposals, max_params, strategy=strategy,
+                           max_flops=max_flops)
 
     max_retries = 5
     for attempt in range(max_retries):
@@ -272,6 +277,17 @@ def critique(context, search_state, proposals, max_params, client,
                     "risk_tags": ["too_large"],
                 })
                 continue
+
+            if max_flops is not None:
+                n_flops = count_subnet_flops(internal_config, seq_len)
+                if n_flops > max_flops:
+                    print(f"  Proposal {idx} [REJECTED] because FLOPs {n_flops:,} > {max_flops:,} (but [ACCEPTED] by LLM)")
+                    rejected_with_critiques.append({
+                        "proposal": config,
+                        "critique": f"Exceeds FLOPs budget: {n_flops:,} > {max_flops:,}",
+                        "risk_tags": ["too_large"],
+                    })
+                    continue
 
         print(f"  Proposal {idx} [ACCEPTED]: {critique_text[:80]}")
         accepted.append(config)

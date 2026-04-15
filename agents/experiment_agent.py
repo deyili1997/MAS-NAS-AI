@@ -20,7 +20,7 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.engine import train_one_epoch, evaluate
-from run_pipeline import count_subnet_params
+from run_pipeline import count_subnet_params, count_subnet_flops
 from model.supernet_transformer import TransformerSuper
 
 
@@ -139,11 +139,13 @@ def run_trials(reviewed_proposals, search_state, ckpt, train_loader, val_loader,
     for i, proposal in enumerate(proposals_to_run):
         config = _to_internal_config(proposal)
 
-        # Validate param count
+        # Validate param count + compute FLOPs
         n_params = count_subnet_params(config, vocab_size, max_adm=max_adm)
+        seq_len = getattr(args, "seq_len", 512)
+        n_flops = count_subnet_flops(config, seq_len)
         print(f"\n    Experiment {i+1}/{len(proposals_to_run)}: "
               f"embed_dim={proposal['embed_dim']}, depth={proposal['depth']}, "
-              f"params={n_params:,}")
+              f"params={n_params:,}, FLOPs={n_flops:,}")
 
         # Run finetune (val only)
         avg_val, best_model_sd = _finetune_one_arch(
@@ -159,6 +161,7 @@ def run_trials(reviewed_proposals, search_state, ckpt, train_loader, val_loader,
             "mlp_ratio": proposal["mlp_ratio"],
             "num_heads": proposal["num_heads"],
             "num_params": n_params,
+            "flops": n_flops,
         }
 
         # Val metrics — visible to LLM agents in subsequent rounds

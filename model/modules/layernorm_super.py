@@ -51,6 +51,3 @@ class LayerNormSuper(torch.nn.LayerNorm):
         assert 'weight' in self.samples.keys()
         assert 'bias' in self.samples.keys()
         return self.samples['weight'].numel() + self.samples['bias'].numel()
-
-    def get_complexity(self, sequence_length):
-        return sequence_length * self.sample_embed_dim

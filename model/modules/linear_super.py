@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
+
 
 class LinearSuper(nn.Linear):
     # 	LinearSuper：把超网 Linear 当作普通线性层，子网权重 = “左上角前缀子矩阵”。
@@ -63,11 +63,6 @@ class LinearSuper(nn.Linear):
             bias_numel = 0
 
         return weight_numel + bias_numel
-    def get_complexity(self, sequence_length):
-        total_flops = 0
-        total_flops += sequence_length *  np.prod(self.samples['weight'].size())
-        return total_flops
-
 def sample_weight(weight, sample_in_dim, sample_out_dim):
     sample_weight = weight[:, :sample_in_dim]
     sample_weight = sample_weight[:sample_out_dim, :]

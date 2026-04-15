@@ -113,6 +113,55 @@ def count_subnet_params(config, vocab_size, num_classes=2, type_vocab_size=7, ma
     return params
 
 
+def count_subnet_flops(config, seq_len, super_embed_dim=256):
+    """
+    Analytically estimate FLOPs for a forward pass through a subnet.
+
+    Uses a fixed reference ``seq_len`` so that FLOPs are comparable across
+    architectures independent of actual input length.
+
+    Counting convention: 1 multiply-add = 2 FLOPs.
+
+    When ``change_qkv=False`` (our default), the QKV linear projects from
+    the *sample* embed_dim ``d`` to ``3 × super_embed_dim``, and the output
+    projection maps ``super_embed_dim → d``.  Each attention head therefore
+    has dimension ``super_embed_dim / num_heads``, **not** a fixed 64.
+    """
+    d = config["embed_dim"][0]
+    depth = config["layer_num"]
+    L = seq_len
+    D_qk = super_embed_dim  # QKV internal dim (change_qkv=False)
+
+    flops = 0
+
+    for i in range(depth):
+        h = config["num_heads"][i]
+        r = config["mlp_ratio"][i]
+        head_dim = D_qk // h  # per-head dimension
+
+        # Attention -----------------------------------------------------------
+        # QKV projection:  L × d → 3 × D_qk
+        flops += 2 * L * d * 3 * D_qk
+        # Q @ K^T:  H heads, each [L, head_dim] × [head_dim, L]
+        flops += 2 * h * L * L * head_dim
+        # attn @ V:  same as Q@K^T
+        flops += 2 * h * L * L * head_dim
+        # Output projection:  L × D_qk → d
+        flops += 2 * L * D_qk * d
+
+        # FFN -----------------------------------------------------------------
+        ffn_dim = int(d * r)
+        # fc1:  L × d → ffn_dim
+        flops += 2 * L * d * ffn_dim
+        # fc2:  L × ffn_dim → d
+        flops += 2 * L * ffn_dim * d
+
+    # Classification head (negligible but included for completeness)
+    flops += 2 * d * 2  # num_classes = 2
+
+    return flops
+
+
 # ---------------------------------------------------------------------------
 # Helper: build tokenizer from full data
 # ---------------------------------------------------------------------------

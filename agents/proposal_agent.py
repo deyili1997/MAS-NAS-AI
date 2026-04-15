@@ -19,7 +19,7 @@ CHOICES = {
 }
 
 
-def _build_prompt(context, search_state, max_params, strategy=None):
+def _build_prompt(context, search_state, max_params, strategy=None, max_flops=None):
     """Build the proposal prompt for Claude."""
     parts = []
 
@@ -47,6 +47,8 @@ def _build_prompt(context, search_state, max_params, strategy=None):
     # Parameter budget
     parts.append(f"\n## Parameter Budget\n")
     parts.append(f"Maximum allowed parameters: {max_params:,}\n")
+    if max_flops is not None:
+        parts.append(f"Maximum allowed FLOPs: {max_flops:,}\n")
 
     # Target dataset info
     target = context.get("target_summary", {})
@@ -242,7 +244,7 @@ def _call_llm(prompt, client, model, max_retries=5):
 
 
 def propose(context, search_state, max_params, client, model="claude-sonnet-4-6",
-            strategy=None):
+            strategy=None, max_flops=None):
     """
     Use Claude to propose new architectures.
 
@@ -251,12 +253,13 @@ def propose(context, search_state, max_params, client, model="claude-sonnet-4-6"
     """
     strat_name = strategy.get("strategy", "exploration") if strategy else "exploration"
     print(f"\n[Agent 1: Architecture Proposal] (strategy={strat_name})")
-    prompt = _build_prompt(context, search_state, max_params, strategy=strategy)
+    prompt = _build_prompt(context, search_state, max_params, strategy=strategy,
+                           max_flops=max_flops)
     return _call_llm(prompt, client, model)
 
 
 def _build_revision_prompt(context, search_state, rejected_with_critiques, max_params,
-                           strategy=None):
+                           strategy=None, max_flops=None):
     """Build a revision prompt based on critic feedback."""
     parts = []
 
@@ -275,6 +278,8 @@ def _build_revision_prompt(context, search_state, rejected_with_critiques, max_p
         "CONSTRAINT: embed_dim must be divisible by num_heads.\n"
         f"Maximum allowed parameters: {max_params:,}\n"
     )
+    if max_flops is not None:
+        parts.append(f"Maximum allowed FLOPs: {max_flops:,}\n")
 
     # SHAP importance
     shap = context.get("shap_importance", {})
@@ -338,7 +343,7 @@ def _build_revision_prompt(context, search_state, rejected_with_critiques, max_p
 
 
 def revise(context, search_state, rejected_with_critiques, max_params, client,
-           model="claude-sonnet-4-6", strategy=None):
+           model="claude-sonnet-4-6", strategy=None, max_flops=None):
     """
     Use Claude to revise rejected proposals based on critic feedback.
 
@@ -352,5 +357,5 @@ def revise(context, search_state, rejected_with_critiques, max_params, client,
     print(f"  Revising {len(rejected_with_critiques)} rejected proposals...")
 
     prompt = _build_revision_prompt(context, search_state, rejected_with_critiques, max_params,
-                                    strategy=strategy)
+                                    strategy=strategy, max_flops=max_flops)
     return _call_llm(prompt, client, model)
