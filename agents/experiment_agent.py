@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.engine import train_one_epoch, evaluate
 from run_pipeline import count_subnet_params, count_subnet_flops
 from model.supernet_transformer import TransformerSuper
+from utils.tracer import get_tracer
 
 
 def _to_internal_config(proposal):
@@ -141,8 +142,8 @@ def run_trials(reviewed_proposals, search_state, ckpt, train_loader, val_loader,
 
         # Validate param count + compute FLOPs
         n_params = count_subnet_params(config, vocab_size, max_adm=max_adm)
-        seq_len = getattr(args, "seq_len", 512)
-        n_flops = count_subnet_flops(config, seq_len)
+        flops_seq_len = getattr(args, "flops_seq_len", 512)
+        n_flops = count_subnet_flops(config, flops_seq_len)
         print(f"\n    Experiment {i+1}/{len(proposals_to_run)}: "
               f"embed_dim={proposal['embed_dim']}, depth={proposal['depth']}, "
               f"params={n_params:,}, FLOPs={n_flops:,}")
@@ -311,6 +312,13 @@ def decide_strategy(context, search_state, client, model="claude-sonnet-4-6"):
                 raise
 
     text = response.content[0].text.strip()
+
+    # Trace LLM prompt/response
+    tracer = get_tracer()
+    if tracer:
+        tracer.log_subsection("LLM Call")
+        tracer.log_prompt(prompt)
+        tracer.log_response(text)
 
     try:
         result = json.loads(text)

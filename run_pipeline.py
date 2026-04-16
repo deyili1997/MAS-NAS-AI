@@ -71,6 +71,8 @@ def parse_args():
                    help="Finetune early stopping patience (epochs without val AUPRC improvement)")
     p.add_argument("--top_k", type=int, default=3,
                    help="Average test performance from top-k validation epochs")
+    p.add_argument("--flops_seq_len", type=int, default=512,
+                   help="Reference sequence length for analytical FLOPs counting")
     p.add_argument("--output_dir", type=str, default="./results")
     return p.parse_args()
 
@@ -113,11 +115,11 @@ def count_subnet_params(config, vocab_size, num_classes=2, type_vocab_size=7, ma
     return params
 
 
-def count_subnet_flops(config, seq_len, super_embed_dim=256):
+def count_subnet_flops(config, flops_seq_len, super_embed_dim=256):
     """
     Analytically estimate FLOPs for a forward pass through a subnet.
 
-    Uses a fixed reference ``seq_len`` so that FLOPs are comparable across
+    Uses a fixed reference ``flops_seq_len`` so that FLOPs are comparable across
     architectures independent of actual input length.
 
     Counting convention: 1 multiply-add = 2 FLOPs.
@@ -129,7 +131,7 @@ def count_subnet_flops(config, seq_len, super_embed_dim=256):
     """
     d = config["embed_dim"][0]
     depth = config["layer_num"]
-    L = seq_len
+    L = flops_seq_len
     D_qk = super_embed_dim  # QKV internal dim (change_qkv=False)
 
     flops = 0
@@ -425,6 +427,7 @@ def finetune_and_evaluate(args, tokenizer, train_data, val_data, test_data,
                 "mlp_ratio": config["mlp_ratio"][0],
                 "num_heads": config["num_heads"][0],
                 "num_params": count_subnet_params(config, vocab_size, num_classes=2, max_adm=max_adm),
+                "flops": count_subnet_flops(config, args.flops_seq_len),
                 "accuracy": avg_test["accuracy"],
                 "f1": avg_test["f1"],
                 "auroc": avg_test["auroc"],

@@ -11,6 +11,8 @@ Uses Claude API to propose transformer architectures based on:
 import json
 import time
 
+from utils.tracer import get_tracer
+
 CHOICES = {
     "mlp_ratio": [2, 4, 8],
     "num_heads": [2, 4, 8],
@@ -218,6 +220,13 @@ def _call_llm(prompt, client, model, max_retries=5):
 
     response_text = response.content[0].text
     print(f"  Raw LLM response length: {len(response_text)} chars")
+
+    # Trace LLM prompt/response
+    tracer = get_tracer()
+    if tracer:
+        tracer.log_subsection("LLM Call")
+        tracer.log_prompt(prompt)
+        tracer.log_response(response_text)
 
     try:
         proposals = _parse_proposals(response_text)

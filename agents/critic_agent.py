@@ -17,6 +17,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from run_pipeline import count_subnet_params, count_subnet_flops
+from utils.tracer import get_tracer
 
 CHOICES = {
     "mlp_ratio": [2, 4, 8],
@@ -46,7 +47,7 @@ def _build_prompt(context, search_state, proposals, max_params, strategy=None,
         f"Maximum parameters: {max_params:,}\n"
     )
     if max_flops is not None:
-        parts.append(f"Maximum FLOPs (reference seq_len): {max_flops:,}\n")
+        parts.append(f"Maximum FLOPs (reference flops_seq_len): {max_flops:,}\n")
 
     # Historical context
     top_k = context.get("top_k_archs", [])
@@ -167,7 +168,7 @@ def _validate_config(config):
 
 def critique(context, search_state, proposals, max_params, client,
              vocab_size=None, max_adm=8, model="claude-sonnet-4-6", strategy=None,
-             max_flops=None, seq_len=512):
+             max_flops=None, flops_seq_len=512):
     """
     Use Claude to critique architecture proposals.
 
@@ -204,6 +205,13 @@ def critique(context, search_state, proposals, max_params, client,
 
     response_text = response.content[0].text
     print(f"  Raw LLM response length: {len(response_text)} chars")
+
+    # Trace LLM prompt/response
+    tracer = get_tracer()
+    if tracer:
+        tracer.log_subsection("LLM Call")
+        tracer.log_prompt(prompt)
+        tracer.log_response(response_text)
 
     try:
         critiques = _parse_critiques(response_text)
@@ -279,7 +287,7 @@ def critique(context, search_state, proposals, max_params, client,
                 continue
 
             if max_flops is not None:
-                n_flops = count_subnet_flops(internal_config, seq_len)
+                n_flops = count_subnet_flops(internal_config, flops_seq_len)
                 if n_flops > max_flops:
                     print(f"  Proposal {idx} [REJECTED] because FLOPs {n_flops:,} > {max_flops:,} (but [ACCEPTED] by LLM)")
                     rejected_with_critiques.append({

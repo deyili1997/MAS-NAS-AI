@@ -44,6 +44,7 @@ from model.supernet_transformer import TransformerSuper
 from dataset_summary import summarize_dataset
 
 from agents import proposal_agent, critic_agent, experiment_agent
+from utils.tracer import Tracer, set_global_tracer
 
 
 # ---------------------------------------------------------------------------
@@ -263,8 +264,8 @@ def parse_args():
     p.add_argument("--max_params", type=int, required=True,
                    help="Maximum subnet parameter count")
     p.add_argument("--max_flops", type=int, default=None,
-                   help="Maximum subnet FLOPs (computed at --seq_len reference length)")
-    p.add_argument("--seq_len", type=int, default=512,
+                   help="Maximum subnet FLOPs (computed at --flops_seq_len reference length)")
+    p.add_argument("--flops_seq_len", type=int, default=512,
                    help="Reference sequence length for FLOPs estimation")
     p.add_argument("--budget", type=int, default=20,
                    help="Total number of architectures to try")
@@ -327,6 +328,23 @@ def main():
     print(f"Target: {args.hospital} / {args.task}")
     print(f"Budget: {args.budget} architectures, max_params={args.max_params:,}")
 
+    # --- Initialize I/O tracer ---
+    output_dir = Path(args.results_dir) / args.hospital
+    output_dir.mkdir(parents=True, exist_ok=True)
+    tracer = Tracer(str(output_dir / f"agent_io_log_{args.task}.txt"))
+    set_global_tracer(tracer)
+    tracer.log_section("RUN CONFIGURATION")
+    tracer.log_kv("hospital", args.hospital)
+    tracer.log_kv("task", args.task)
+    tracer.log_kv("budget", args.budget)
+    tracer.log_kv("max_params", args.max_params)
+    tracer.log_kv("max_flops", args.max_flops)
+    tracer.log_kv("model", args.model)
+    tracer.log_kv("seed", args.seed)
+    tracer.log_kv("finetune_epochs", args.finetune_epochs)
+    tracer.log_kv("batch_size", args.batch_size)
+    tracer.log_kv("lr", args.lr)
+
     # --- Load data ---
     data_root = Path(f"./data_process/{args.hospital}/{args.hospital}-processed")
     full_data_path = data_root / "mimic.pkl"
@@ -384,6 +402,15 @@ def main():
         top_k=args.top_k,
     )
 
+    tracer.log_section("PHASE 0 — HISTORICAL CONTEXT")
+    sim_hosp = context.get("similar_hospital", "N/A")
+    sim_score = context.get("similarity_score")
+    sim_str = f"{sim_hosp}  (similarity = {sim_score:.4f})" if sim_score else sim_hosp
+    tracer.log_kv("Similar hospital", sim_str)
+    tracer.log_kv("Matched task", context.get("matched_task", args.task))
+    tracer.log_arch_table(context.get("top_k_archs", []), label="Top-k historical architectures")
+    tracer.log_shap(context.get("shap_importance"))
+
     # =============================================
     # Search loop: Agent 1 (Proposal) -> Agent 2 (Critic) -> Agent 3 (Experiment + Strategy)
     # =============================================
@@ -407,6 +434,14 @@ def main():
         print(f"{'='*60}")
 
         # Agent 1: Propose architectures
+        tracer.log_section(f"ROUND {round_num} — AGENT 1: PROPOSAL")
+        tracer.log_subsection("Inputs")
+        tracer.log_kv("Strategy", f"{strategy['strategy']} (\"{strategy['rationale']}\")")
+        tracer.log_kv("Budget remaining", search_state["budget_remaining"])
+        tracer.log_kv("Completed exps", len(search_state["completed_experiments"]))
+        flops_str = Tracer._fmt_int(args.max_flops) if args.max_flops else "None"
+        tracer.log_kv("Constraints", f"max_params={Tracer._fmt_int(args.max_params)}  max_flops={flops_str}")
+
         proposals = proposal_agent.propose(
             context=context,
             search_state=search_state,
@@ -416,6 +451,9 @@ def main():
             strategy=strategy,
             max_flops=args.max_flops,
         )
+
+        tracer.log_subsection(f"Output: {len(proposals)} Proposals")
+        tracer.log_archs("Proposals", proposals)
 
         if not proposals:
             consecutive_failures += 1
@@ -432,6 +470,11 @@ def main():
 
         for revision_round in range(max_revision_rounds):
             # Agent 2: Critique
+            tracer.log_section(f"ROUND {round_num} — AGENT 2: CRITIC (pass {revision_round+1}/{max_revision_rounds})")
+            tracer.log_subsection("Inputs")
+            tracer.log_kv("Reviewing", f"{len(proposals)} proposals")
+            tracer.log_kv("Strategy", strategy["strategy"])
+
             accepted, rejected = critic_agent.critique(
                 context=context,
                 search_state=search_state,
@@ -443,8 +486,13 @@ def main():
                 model=args.model,
                 strategy=strategy,
                 max_flops=args.max_flops,
-                seq_len=args.seq_len,
+                flops_seq_len=args.flops_seq_len,
             )
+
+            tracer.log_subsection("Output")
+            tracer.log_archs("Accepted", accepted)
+            tracer.log_rejected(rejected)
+
             all_accepted.extend(accepted)
 
             if not rejected:
@@ -453,6 +501,10 @@ def main():
 
             if revision_round < max_revision_rounds - 1:
                 # Agent 1: Revise rejected proposals
+                tracer.log_section(f"ROUND {round_num} — AGENT 1: REVISE (pass {revision_round+1})")
+                tracer.log_subsection("Inputs")
+                tracer.log_rejected(rejected, label="Critiques to address")
+
                 proposals = proposal_agent.revise(
                     context=context,
                     search_state=search_state,
@@ -463,6 +515,10 @@ def main():
                     strategy=strategy,
                     max_flops=args.max_flops,
                 )
+
+                tracer.log_subsection("Output: Revised Proposals")
+                tracer.log_archs("Revised", proposals)
+
                 if not proposals:
                     print(f"  Revision produced no valid proposals, stopping revision loop")
                     break
@@ -484,6 +540,12 @@ def main():
         consecutive_failures = 0  # Reset on success
 
         # Agent 3: Run experiments (val only)
+        tracer.log_section(f"ROUND {round_num} — AGENT 3a: EXPERIMENT")
+        tracer.log_subsection("Inputs")
+        tracer.log_kv("Architectures", f"{len(reviewed)} accepted proposals")
+        tracer.log_kv("Budget remaining", search_state["budget_remaining"])
+
+        n_before = len(search_state["completed_experiments"])
         search_state = experiment_agent.run_trials(
             reviewed_proposals=reviewed,
             search_state=search_state,
@@ -496,14 +558,32 @@ def main():
             max_adm=max_adm,
         )
 
+        new_results = search_state["completed_experiments"][n_before:]
+        tracer.log_subsection("Results")
+        tracer.log_arch_table(new_results, label="New experiment results")
+        tracer.log_kv("Budget remaining", search_state["budget_remaining"])
+        best = search_state.get("best_proposal")
+        if best:
+            tracer.log_kv("Current best", f"{Tracer._fmt_arch(best)} (avg_rank={best.get('avg_rank', '?')})")
+
         # Agent 3: Decide strategy for next round
         if search_state["budget_remaining"] > 0:
+            tracer.log_section(f"ROUND {round_num} — AGENT 3b: STRATEGY")
+            tracer.log_subsection("Inputs")
+            tracer.log_kv("Completed exps", len(search_state["completed_experiments"]))
+            tracer.log_kv("Budget remaining", search_state["budget_remaining"])
+
             strategy = experiment_agent.decide_strategy(
                 context=context,
                 search_state=search_state,
                 client=client,
                 model=args.model,
             )
+
+            tracer.log_subsection("Decision")
+            tracer.log_kv("Strategy", f"{strategy['strategy']}")
+            tracer.log_kv("Rationale", f"\"{strategy.get('rationale', '')}\"")
+
 
     # =============================================
     # Save search results (val only)
@@ -588,6 +668,20 @@ def main():
     print(f"    AUROC    = {test_metrics['auroc']:.4f}")
     print(f"    AUPRC    = {test_metrics['auprc']:.4f}")
 
+    tracer.log_section("FINAL TEST EVALUATION")
+    best_arch_dict = {
+        "embed_dim": int(best_row_info["embed_dim"]),
+        "depth": int(best_row_info["depth"]),
+        "mlp_ratio": int(best_row_info.get("mlp_ratio", 0)),
+        "num_heads": int(best_row_info.get("num_heads", 0)),
+    }
+    tracer.log_kv("Best architecture", f"{Tracer._fmt_arch(best_arch_dict)}  (params={Tracer._fmt_int(int(best_row_info['num_params']))})")
+    tracer.log_subsection("Test Results")
+    tracer.log_kv("Accuracy", f"{test_metrics['accuracy']:.4f}")
+    tracer.log_kv("F1", f"{test_metrics['f1']:.4f}")
+    tracer.log_kv("AUROC", f"{test_metrics['auroc']:.4f}")
+    tracer.log_kv("AUPRC", f"{test_metrics['auprc']:.4f}")
+
     # Append test results to CSV
     best_row = df.iloc[0].to_dict()
     best_row["test_accuracy"] = test_metrics["accuracy"]
@@ -597,6 +691,9 @@ def main():
     test_csv_path = output_dir / f"mas_best_{args.task}.csv"
     pd.DataFrame([best_row]).to_csv(test_csv_path, index=False)
     print(f"\n  Best architecture + test results saved to {test_csv_path}")
+
+    tracer.close()
+    print(f"  Agent I/O log saved to {tracer.path}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,347 @@
+================================================================================
+MAS-NAS: Multi-Agent System — Agent Input/Output Specification
+================================================================================
+
+System: 3-agent system for Neural Architecture Search on EHR Transformers
+Orchestrator: mas_search.py
+
+Search Space (shared across all agents):
+  embed_dim  ∈ {64, 128, 256}
+  depth      ∈ {2, 4, 8}
+  mlp_ratio  ∈ {2, 4, 8}
+  num_heads  ∈ {2, 4, 8}
+  Constraint: embed_dim % num_heads == 0
+
+================================================================================
+PHASE 0: HISTORICAL CONTEXT GATHERING (Orchestrator, non-LLM)
+================================================================================
+Source: mas_search.py → gather_historical_context()
+
+  Input:
+    - hospital              (str)   target hospital name
+    - task                  (str)   "death" | "stay" | "readmission"
+    - max_params            (int)   parameter budget
+    - results_dir           (str)   path to past experiment results
+    - top_k                 (int)   number of top archs to retrieve
+
+  Output → context (dict):
+    - target_summary        (dict)  dataset statistics of target hospital
+    - similar_hospital      (str)   name of most similar historical hospital
+    - similarity_score      (float) cosine similarity [0, 1]
+    - matched_task          (str)   task used for retrieval (may differ if exact task unavailable)
+    - top_k_archs           (list)  top-k architectures from similar hospital
+        Each: {embed_dim, depth, mlp_ratio, num_heads, num_params,
+               accuracy, f1, auroc, auprc}
+    - shap_importance       (dict)  {feature_name: mean_|SHAP|_value}
+
+  Note: This context is computed ONCE before the search loop and passed
+        to all agents as read-only background knowledge.
+
+================================================================================
+SEARCH LOOP (repeats until budget exhausted)
+================================================================================
+  Shared state across iterations:
+    - search_state["completed_experiments"]   list of evaluated arch results
+    - search_state["budget_remaining"]        int, decremented after each eval
+    - strategy                                dict from Agent 3
+
+================================================================================
+AGENT 1: PROPOSAL (LLM-based)
+================================================================================
+Source: agents/proposal_agent.py
+
+--- 1a. propose() ----------------------------------------------------------
+
+  Input:
+    - context               (dict)    [from Phase 0]
+        .target_summary               dataset stats
+        .top_k_archs                   historical best archs
+        .shap_importance               SHAP feature importance
+        .similar_hospital              most similar hospital name
+        .similarity_score              cosine sim score
+    - search_state          (dict)
+        .completed_experiments         all past {embed_dim, depth, mlp_ratio,
+                                       num_heads, num_params, flops,
+                                       val_accuracy, val_f1, val_auroc, val_auprc}
+        .budget_remaining              int
+    - max_params            (int)      parameter budget
+    - max_flops             (int|None) FLOPs budget (optional)
+    - strategy              (dict)
+        .strategy                      "exploration" | "exploitation"
+        .rationale                     free-text explanation
+    - client                           Anthropic API client
+    - model                 (str)      Claude model ID
+
+  Output:
+    - proposals             (list of dict)
+        Each: {
+            "embed_dim":   int,
+            "depth":       int,
+            "mlp_ratio":   int,
+            "num_heads":   int,
+            "rationale":   str     ← free-text design rationale
+        }
+    - Printed to console: each proposal's config + rationale
+
+--- 1b. revise() -----------------------------------------------------------
+
+  Input:
+    - context               (dict)    [same as propose]
+    - search_state          (dict)    [same as propose]
+    - rejected_with_critiques (list of dict)
+        Each: {
+            "proposal":    {embed_dim, depth, mlp_ratio, num_heads},
+            "critique":    str,       ← Agent 2's rejection reason
+            "risk_tags":   [str]      ← e.g. ["too_similar", "ignores_shap"]
+        }
+    - max_params            (int)
+    - max_flops             (int|None)
+    - strategy              (dict)
+    - client, model
+
+  Output:
+    - revised_proposals     (list of dict)
+        Same format as propose() output
+
+  Flow: Called when Agent 2 rejects proposals. Up to 3 revision rounds.
+
+================================================================================
+AGENT 2: CRITIC (LLM-based)
+================================================================================
+Source: agents/critic_agent.py
+
+--- critique() -------------------------------------------------------------
+
+  Input:
+    - context               (dict)    [from Phase 0]
+        .top_k_archs                   historical best archs
+        .shap_importance               SHAP feature importance
+    - search_state          (dict)
+        .completed_experiments         all past evaluated archs
+    - proposals             (list of dict)
+        Each: {embed_dim, depth, mlp_ratio, num_heads, rationale}
+    - max_params            (int)
+    - max_flops             (int|None)
+    - flops_seq_len               (int)      reference seq length for FLOPs
+    - vocab_size            (int)      for param counting
+    - max_adm               (int)      for param counting
+    - strategy              (dict)
+        .strategy                      "exploration" | "exploitation"
+        .rationale
+    - client, model
+
+  LLM Review Criteria (strategy-dependent):
+    - embed_dim % num_heads == 0?
+    - Too similar to already-tried arch?
+    - Leverages SHAP insights?
+    - Diverse relative to batch?
+    - Exploration mode: tolerant of divergence, reject only hard violations
+    - Exploitation mode: tolerant of similarity to best, reject wild deviations
+
+  Hard Validation (post-LLM, algorithmic):
+    - _validate_config(): search space + divisibility check
+    - count_subnet_params() <= max_params
+    - count_subnet_flops()  <= max_flops (if set)
+
+  Output:
+    - accepted              (list of dict)
+        Each: {embed_dim, depth, mlp_ratio, num_heads}
+        → forwarded to Agent 3
+    - rejected_with_critiques (list of dict)
+        Each: {
+            "proposal":    {embed_dim, depth, mlp_ratio, num_heads},
+            "critique":    str,
+            "risk_tags":   [str]
+                Valid tags: "too_large", "too_similar",
+                           "constraint_violation",
+                           "unexplored_region", "ignores_shap"
+        }
+        → sent back to Agent 1 for revision
+
+================================================================================
+AGENT 3: EXPERIMENT + STRATEGY (Dual-role)
+================================================================================
+Source: agents/experiment_agent.py
+
+--- 3a. run_trials() — Algorithmic -----------------------------------------
+
+  Input:
+    - reviewed_proposals    (list of dict)
+        Each: {embed_dim, depth, mlp_ratio, num_heads}
+        (accepted by Agent 2)
+    - search_state          (dict)
+    - ckpt                  (dict)     pretrained supernet checkpoint
+        .model_state_dict              supernet weights
+        .vocab_size, .embed_dim, .depth, .num_heads, .mlp_ratio, .max_adm_num
+    - train_loader, val_loader         PyTorch DataLoaders
+    - device                           torch.device
+    - args                             CLI args (finetune_epochs, lr, etc.)
+    - vocab_size            (int)
+    - max_adm               (int)
+
+  Per-architecture processing:
+    1. _to_internal_config(proposal)
+         scalar dict → per-layer lists
+         {embed_dim: 128, depth: 4, ...}
+           → {embed_dim: [128,128,128,128], layer_num: 4, ...}
+    2. count_subnet_params(internal_config, vocab_size)
+    3. count_subnet_flops(internal_config, flops_seq_len)
+    4. _finetune_one_arch(internal_config, ckpt, train_loader, val_loader, ...)
+         - Build TransformerSuper from ckpt dimensions
+         - Load pretrained weights (skip cls head)
+         - Finetune with early stopping (patience = finetune_patience)
+         - Top-k epoch averaging on val metrics
+    5. _update_best_by_composite_rank(search_state)
+         - Rank all completed experiments by avg rank of
+           {val_accuracy, val_f1, val_auroc, val_auprc}
+         - Track global best model_state_dict for final test
+
+  Output → updated search_state:
+    - search_state["completed_experiments"]  (appended)
+        Each new entry: {
+            "embed_dim":      int,
+            "depth":          int,
+            "mlp_ratio":      int,
+            "num_heads":      int,
+            "num_params":     int,
+            "flops":          int,
+            "val_accuracy":   float,
+            "val_f1":         float,
+            "val_auroc":      float,
+            "val_auprc":      float,
+        }
+    - search_state["budget_remaining"]       (decremented)
+    - search_state["best_model_sd"]          (best model weights)
+    - search_state["best_config"]            (best internal config)
+    - search_state["_model_sds"]             (all model weights, internal)
+    - search_state["_configs"]               (all internal configs, internal)
+
+--- 3b. decide_strategy() — LLM-based -------------------------------------
+
+  Input:
+    - context               (dict)    [from Phase 0]
+        .top_k_archs                   historical best archs
+        .shap_importance               SHAP feature importance
+    - search_state          (dict)
+        .completed_experiments         all evaluated archs + val metrics
+        .budget_remaining              remaining budget
+    - client, model
+
+  Decision Guidelines (in prompt):
+    EXPLORATION when:
+      - Few experiments completed
+      - Results similar across archs (no clear winner)
+      - Important SHAP features not yet varied
+      - Budget still large
+    EXPLOITATION when:
+      - Clear best-performing region emerged
+      - Budget running low
+      - High-SHAP features have clear optimal range
+
+  Output:
+    - strategy              (dict)
+        {
+            "strategy":  "exploration" | "exploitation",
+            "rationale": str
+        }
+    → Passed to Agent 1 and Agent 2 in the NEXT round
+
+================================================================================
+POST-SEARCH: FINAL TEST EVALUATION (Orchestrator, non-LLM)
+================================================================================
+Source: mas_search.py
+
+  Input:
+    - search_state["best_model_sd"]      best model by composite val rank
+    - search_state["best_config"]        internal config of best model
+    - ckpt                               supernet checkpoint (for model init)
+    - test_loader                        held-out test DataLoader
+
+  Processing:
+    1. Rebuild TransformerSuper from ckpt dimensions
+    2. Load best_model_sd
+    3. evaluate(test_loader, model, device, retrain_config=best_config)
+
+  Output:
+    - Console: test accuracy, F1, AUROC, AUPRC
+    - CSV files:
+        results/<hospital>/mas_search_<task>.csv
+            All evaluated archs + val metrics, ranked by composite val rank
+        results/<hospital>/mas_best_<task>.csv
+            Single row: best arch + val metrics + test metrics
+
+================================================================================
+DATA FLOW DIAGRAM
+================================================================================
+
+  Round 1: strategy = "exploration" (hardcoded)
+
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │                    HISTORICAL CONTEXT (once)                       │
+  │  dataset similarity → top-k archs → SHAP importance               │
+  └──────────────────────────────┬──────────────────────────────────────┘
+                                 │ context
+                                 ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │  AGENT 1: PROPOSAL (LLM)                                    │
+  │  input:  context + search_state + strategy + constraints     │
+  │  output: proposals [{embed_dim, depth, mlp_ratio,            │
+  │                      num_heads, rationale}, ...]             │
+  └──────────────────────────┬───────────────────────────────────┘
+                             │ proposals
+                             ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │  AGENT 2: CRITIC (LLM)                                      │
+  │  input:  context + search_state + proposals + strategy       │
+  │          + constraints (max_params, max_flops)               │
+  │  output: accepted[] + rejected_with_critiques[]              │
+  └─────┬────────────────────────────────────┬───────────────────┘
+        │ accepted                           │ rejected
+        │                                    ▼
+        │                    ┌───────────────────────────────────┐
+        │                    │  AGENT 1: REVISE (LLM)           │
+        │                    │  input:  rejected + critiques     │
+        │                    │  output: revised proposals        │
+        │                    │  (loop up to 3 rounds)            │
+        │                    └───────────────┬───────────────────┘
+        │                                    │ back to Agent 2
+        │◄───────────────────────────────────┘
+        │ all accepted
+        ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │  AGENT 3a: EXPERIMENT (Algorithmic)                          │
+  │  input:  accepted proposals + ckpt + train/val loaders       │
+  │  output: search_state updated with val metrics + model SDs   │
+  │          {val_accuracy, val_f1, val_auroc, val_auprc,        │
+  │           num_params, flops}                                 │
+  └──────────────────────────┬───────────────────────────────────┘
+                             │ search_state
+                             ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │  AGENT 3b: STRATEGY DECISION (LLM)                          │
+  │  input:  context + search_state (all completed experiments)  │
+  │  output: strategy {"exploration"|"exploitation", rationale}  │
+  └──────────────────────────┬───────────────────────────────────┘
+                             │ strategy
+                             ▼
+                    ┌────────────────┐
+                    │  Next Round    │──► back to Agent 1
+                    │  (if budget>0) │
+                    └────────────────┘
+
+================================================================================
+BASELINES (for comparison)
+================================================================================
+
+--- Baseline 0: Evolution (baselines/baseline0.py) -----
+  Same: ckpt, search space, finetune eval, composite rank, budget, data loading
+  Different: no LLM, no historical context, no SHAP
+  Loop: random init → [mutation + crossover → evaluate → select top-k] × N
+  Output CSVs: baseline0_search_<task>.csv, baseline0_best_<task>.csv
+
+--- Baseline 1: Single LLM (baselines/baseline1.py) ---
+  Same: ckpt, search space, finetune eval, composite rank, budget, data loading
+  Different: single LLM call per iteration (no multi-agent debate),
+             no historical context, no SHAP, no strategy agent
+  Loop: [LLM sees all past results → proposes 1 arch → evaluate] × budget
+  Output CSVs: baseline1_search_<task>.csv, baseline1_best_<task>.csv
