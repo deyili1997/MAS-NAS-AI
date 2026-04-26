@@ -20,10 +20,10 @@ from run_pipeline import count_subnet_params, count_subnet_flops
 from utils.tracer import get_tracer
 
 CHOICES = {
-    "mlp_ratio": [2, 4, 8],
-    "num_heads": [2, 4, 8],
-    "embed_dim": [64, 128, 256],
-    "depth": [2, 4, 8],
+    "mlp_ratio": [1, 2, 4, 8],
+    "num_heads": [1, 2, 4, 8],
+    "embed_dim": [16, 32, 64, 128],
+    "depth": [1, 2, 4, 8],
 }
 
 

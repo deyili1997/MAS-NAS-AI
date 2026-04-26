@@ -34,10 +34,10 @@ from model.supernet_transformer import TransformerSuper
 # Search space
 # ---------------------------------------------------------------------------
 CHOICES = {
-    "mlp_ratio": [2, 4, 8],
-    "num_heads": [2, 4, 8],
-    "embed_dim": [64, 128, 256],
-    "depth": [2, 4, 8],
+    "mlp_ratio": [1, 2, 4, 8],
+    "num_heads": [1, 2, 4, 8],
+    "embed_dim": [16, 32, 64, 128],
+    "depth": [1, 2, 4, 8],
 }
 
 TASKS = ALL_TASKS  # imported from task_registry
@@ -55,7 +55,7 @@ def parse_args():
     p.add_argument("--weight_decay", type=float, default=1e-2)
     p.add_argument("--max_grad_norm", type=float, default=1.0)
     # supernet max dimensions (must be >= max of CHOICES)
-    p.add_argument("--embed_dim", type=int, default=256)
+    p.add_argument("--embed_dim", type=int, default=128)
     p.add_argument("--depth", type=int, default=8)
     p.add_argument("--num_heads", type=int, default=8)
     p.add_argument("--mlp_ratio", type=float, default=8)
@@ -124,7 +124,7 @@ def count_subnet_params(config, vocab_size, num_classes=2, type_vocab_size=7, ma
     return params
 
 
-def count_subnet_flops(config, flops_seq_len, super_embed_dim=256, num_classes=2):
+def count_subnet_flops(config, flops_seq_len, super_embed_dim=128, num_classes=2):
     """
     Analytically estimate FLOPs for a forward pass through a subnet.
 
@@ -239,6 +239,28 @@ def pretrain(args, tokenizer, pretrain_data, max_adm, device):
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     criterion = torch.nn.CrossEntropyLoss(ignore_index=-100)
 
+    # ---- LR schedule: linear warmup → cosine decay (per-epoch granularity) ----
+    # Warmup over the first 10% of pretrain_epochs (≥1), starting at 1% of peak
+    # LR; then cosine decay over the remaining epochs to 1% of peak LR. This is
+    # the standard "transformer pretrain" schedule and stabilizes supernet
+    # training where gradient noise across sampled subnets is high.
+    warmup_epochs = max(1, int(0.1 * args.pretrain_epochs))
+    cosine_epochs = max(1, args.pretrain_epochs - warmup_epochs)
+    eta_min = args.lr * 0.01
+    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+        optimizer, start_factor=0.01, end_factor=1.0, total_iters=warmup_epochs,
+    )
+    cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=cosine_epochs, eta_min=eta_min,
+    )
+    scheduler = torch.optim.lr_scheduler.SequentialLR(
+        optimizer,
+        schedulers=[warmup_scheduler, cosine_scheduler],
+        milestones=[warmup_epochs],
+    )
+    print(f"LR schedule: warmup {warmup_epochs} ep (1%→100% × lr={args.lr:.2e}), "
+          f"then cosine decay {cosine_epochs} ep → eta_min={eta_min:.2e}")
+
     # Largest supernet config for validation
     max_depth = max(CHOICES["depth"])
     val_config = {
@@ -262,7 +284,9 @@ def pretrain(args, tokenizer, pretrain_data, max_adm, device):
 
         val_metrics = evaluate_mlm(val_loader, model, device, config=val_config)
 
+        cur_lr = optimizer.param_groups[0]["lr"]
         print(f"[Pretrain Epoch {epoch+1}/{args.pretrain_epochs}] "
+              f"lr={cur_lr:.2e}  "
               f"train_loss={metrics['loss']:.4f}  masked_acc={metrics.get('masked_acc', 0):.4f}  "
               f"val_loss={val_metrics['loss']:.4f}  val_acc={val_metrics['masked_acc']:.4f}")
 
@@ -277,6 +301,8 @@ def pretrain(args, tokenizer, pretrain_data, max_adm, device):
             print(f"Pretrain early stopping at epoch {epoch+1} "
                   f"(no val loss improvement for {args.pretrain_patience} epochs)")
             break
+
+        scheduler.step()
 
     # Restore best model
     if best_model_sd is not None:

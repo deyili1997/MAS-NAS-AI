@@ -14,10 +14,10 @@ import time
 from utils.tracer import get_tracer
 
 CHOICES = {
-    "mlp_ratio": [2, 4, 8],
-    "num_heads": [2, 4, 8],
-    "embed_dim": [64, 128, 256],
-    "depth": [2, 4, 8],
+    "mlp_ratio": [1, 2, 4, 8],
+    "num_heads": [1, 2, 4, 8],
+    "embed_dim": [16, 32, 64, 128],
+    "depth": [1, 2, 4, 8],
 }
 
 
@@ -36,14 +36,13 @@ def _build_prompt(context, search_state, max_params, strategy=None, max_flops=No
     parts.append(f"Available choices: {json.dumps(CHOICES)}\n")
     parts.append(
         "Each architecture is defined by four scalar hyperparameters:\n"
-        "- embed_dim: one value from [64, 128, 256]\n"
-        "- depth: number of transformer layers, from [2, 4, 8]\n"
-        "- mlp_ratio: one value from [2, 4, 8], constant across all layers\n"
-        "- num_heads: one value from [2, 4, 8], constant across all layers\n\n"
-        "CONSTRAINT: embed_dim must be divisible by num_heads.\n"
-        "  Valid combos: embed_dim=64 -> num_heads in [2,4,8]\n"
-        "                embed_dim=128 -> num_heads in [2,4,8]\n"
-        "                embed_dim=256 -> num_heads in [2,4,8]\n"
+        f"- embed_dim: one value from {CHOICES['embed_dim']}\n"
+        f"- depth: number of transformer layers, from {CHOICES['depth']}\n"
+        f"- mlp_ratio: one value from {CHOICES['mlp_ratio']}, constant across all layers\n"
+        f"- num_heads: one value from {CHOICES['num_heads']}, constant across all layers\n\n"
+        "CONSTRAINT: embed_dim must be divisible by num_heads (all currently "
+        "listed combos satisfy this — every embed_dim is a multiple of every "
+        "num_heads, so any pairing is valid).\n"
     )
 
     # Parameter budget

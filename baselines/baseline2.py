@@ -98,11 +98,12 @@ def _build_prompt(search_state, max_params, hospital, task, max_flops=None):
     parts.append(f"Available choices: {json.dumps(CHOICES)}\n")
     parts.append(
         "Each architecture is defined by four scalar hyperparameters:\n"
-        "- embed_dim: one value from [64, 128, 256]\n"
-        "- depth: number of transformer layers, from [2, 4, 8]\n"
-        "- mlp_ratio: one value from [2, 4, 8], constant across all layers\n"
-        "- num_heads: one value from [2, 4, 8], constant across all layers\n\n"
-        "CONSTRAINT: embed_dim must be divisible by num_heads.\n"
+        f"- embed_dim: one value from {CHOICES['embed_dim']}\n"
+        f"- depth: number of transformer layers, from {CHOICES['depth']}\n"
+        f"- mlp_ratio: one value from {CHOICES['mlp_ratio']}, constant across all layers\n"
+        f"- num_heads: one value from {CHOICES['num_heads']}, constant across all layers\n\n"
+        "CONSTRAINT: embed_dim must be divisible by num_heads (every embed_dim "
+        "above is a multiple of every num_heads, so any pairing is valid).\n"
     )
 
     # Parameter budget
@@ -334,7 +335,7 @@ def parse_args():
     # Pretrain hyperparams (used when --ckpt_path not provided)
     p.add_argument("--pretrain_epochs", type=int, default=50)
     p.add_argument("--pretrain_patience", type=int, default=5)
-    p.add_argument("--embed_dim", type=int, default=256)
+    p.add_argument("--embed_dim", type=int, default=128)
     p.add_argument("--depth", type=int, default=8)
     p.add_argument("--num_heads", type=int, default=8)
     p.add_argument("--mlp_ratio", type=float, default=8)

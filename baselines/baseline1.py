@@ -262,7 +262,7 @@ def parse_args():
     # Pretrain hyperparams (used when --ckpt_path not provided)
     p.add_argument("--pretrain_epochs", type=int, default=50)
     p.add_argument("--pretrain_patience", type=int, default=5)
-    p.add_argument("--embed_dim", type=int, default=256)
+    p.add_argument("--embed_dim", type=int, default=128)
     p.add_argument("--depth", type=int, default=8)
     p.add_argument("--num_heads", type=int, default=8)
     p.add_argument("--mlp_ratio", type=float, default=8)

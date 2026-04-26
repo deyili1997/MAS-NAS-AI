@@ -288,7 +288,7 @@ def parse_args():
     p.add_argument("--pretrain_patience", type=int, default=5,
                    help="Pretrain early stopping patience")
     # Supernet max dimensions
-    p.add_argument("--embed_dim", type=int, default=256)
+    p.add_argument("--embed_dim", type=int, default=128)
     p.add_argument("--depth", type=int, default=8)
     p.add_argument("--num_heads", type=int, default=8)
     p.add_argument("--mlp_ratio", type=float, default=8)

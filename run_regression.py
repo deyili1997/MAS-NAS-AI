@@ -63,7 +63,7 @@ def parse_args():
     p.add_argument("--pretrain_patience", type=int, default=5)
 
     # Supernet max dims (AutoFormer path only)
-    p.add_argument("--embed_dim", type=int, default=256)
+    p.add_argument("--embed_dim", type=int, default=128)
     p.add_argument("--depth", type=int, default=8)
     p.add_argument("--num_heads", type=int, default=8)
     p.add_argument("--mlp_ratio", type=float, default=8)
@@ -160,6 +160,25 @@ def pretrain_supernet(args, vocab_size, max_adm, train_loader, val_loader, devic
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     criterion = torch.nn.CrossEntropyLoss(ignore_index=-100)
 
+    # ---- LR schedule: linear warmup → cosine decay (mirrors run_pipeline.pretrain) ----
+    warmup_epochs = max(1, int(0.1 * args.pretrain_epochs))
+    cosine_epochs = max(1, args.pretrain_epochs - warmup_epochs)
+    eta_min = args.lr * 0.01
+    scheduler = torch.optim.lr_scheduler.SequentialLR(
+        optimizer,
+        schedulers=[
+            torch.optim.lr_scheduler.LinearLR(
+                optimizer, start_factor=0.01, end_factor=1.0, total_iters=warmup_epochs,
+            ),
+            torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=cosine_epochs, eta_min=eta_min,
+            ),
+        ],
+        milestones=[warmup_epochs],
+    )
+    print(f"[SupernetPretrain] LR schedule: warmup {warmup_epochs} ep "
+          f"(1%→100% × lr={args.lr:.2e}), cosine decay {cosine_epochs} ep → {eta_min:.2e}")
+
     max_depth = max(CHOICES["depth"])
     val_config = {
         "embed_dim": [args.embed_dim] * max_depth,
@@ -180,7 +199,9 @@ def pretrain_supernet(args, vocab_size, max_adm, train_loader, val_loader, devic
             max_grad_norm=args.max_grad_norm,
         )
         val_metrics = evaluate_mlm(val_loader, model, device, config=val_config)
+        cur_lr = optimizer.param_groups[0]["lr"]
         print(f"[SupernetPretrain Epoch {epoch+1}/{args.pretrain_epochs}] "
+              f"lr={cur_lr:.2e}  "
               f"train_loss={metrics['loss']:.4f}  "
               f"val_loss={val_metrics['loss']:.4f}  "
               f"val_acc={val_metrics['masked_acc']:.4f}")
@@ -195,6 +216,8 @@ def pretrain_supernet(args, vocab_size, max_adm, train_loader, val_loader, devic
         if no_improve >= args.pretrain_patience:
             print(f"[SupernetPretrain] early stop at epoch {epoch+1}")
             break
+
+        scheduler.step()
 
     if best_sd is not None:
         model.load_state_dict(best_sd)
