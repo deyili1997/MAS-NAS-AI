@@ -1,26 +1,38 @@
 """
-Evolution Search Baseline for EHR Transformer NAS
-===================================================
-A fair-comparison baseline for MAS-NAS. It uses:
-  - The SAME pretrained EHR Transformer supernet checkpoint
-  - The SAME scalar search space (embed_dim, depth, mlp_ratio, num_heads)
-  - The SAME finetune-based evaluation (`_finetune_one_arch` from MAS)
-  - The SAME composite val-rank selection rule
-  - The SAME --budget semantics (total architectures finetuned)
+Random Search Baseline for EHR Transformer NAS
+================================================
+The simplest possible NAS baseline. For each of `--budget` iterations:
+  1. Uniformly sample a scalar config (embed_dim, depth, mlp_ratio, num_heads)
+     from CHOICES, rejecting duplicates and configs that violate the
+     `embed_dim % num_heads == 0` constraint or the param/FLOPs budget.
+  2. Finetune the sampled architecture on the SAME pretrained EHR Transformer
+     supernet using `_finetune_one_arch` (val-only, top-k epoch averaging).
+  3. Record validation metrics.
 
-It removes all historical context (no SHAP, no top-k archs from similar
-hospitals, no dataset similarity, no LLM agents). The searcher sees only
-the val metrics of architectures it has itself evaluated.
+After the search, the architecture with the best composite val rank is
+re-built and evaluated on the held-out test set.
+
+This baseline removes ALL search intelligence — no LLM, no evolution, no
+quality-diversity, no historical context. It establishes a floor: any
+"smart" baseline must beat random sampling under the same compute budget
+to claim that its search procedure is contributing value.
+
+It uses:
+  - The SAME pretrained EHR Transformer supernet checkpoint
+  - The SAME scalar search space (CHOICES from run_pipeline)
+  - The SAME finetune-based evaluation (`_finetune_one_arch`)
+  - The SAME composite val-rank selection rule and final test evaluation
+  - The SAME --budget semantics (total architectures finetuned)
 
 Usage:
     # Reuse an existing MAS-produced checkpoint
-    python baselines/baseline0.py \
-        --hospital MIMIC-IV --task death \
-        --max_params 1000000 --budget 10 \
+    python baselines/baseline0.py \\
+        --hospital MIMIC-IV --task death \\
+        --max_params 1000000 --budget 10 \\
         --ckpt_path results/MIMIC-IV/checkpoint_mlm/mlm_model.pt
 
     # Or pretrain automatically
-    python baselines/baseline0.py \
+    python baselines/baseline0.py \\
         --hospital MIMIC-IV --task death --max_params 1000000 --budget 10
 """
 
@@ -36,7 +48,7 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-# Make MAS-NAS importable (baselines/ now lives inside MAS-NAS/)
+# Make MAS-NAS importable (baselines/ lives inside MAS-NAS/)
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _MAS_NAS_DIR = os.path.abspath(os.path.join(_THIS_DIR, ".."))
 sys.path.insert(0, _MAS_NAS_DIR)
@@ -46,23 +58,37 @@ from agents.experiment_agent import (  # noqa: E402
     _to_internal_config,
     _update_best_by_composite_rank,
 )
-from run_pipeline import build_tokenizer, pretrain, count_subnet_params, count_subnet_flops, CHOICES  # noqa: E402
+from run_pipeline import (  # noqa: E402
+    build_tokenizer, pretrain, count_subnet_params, count_subnet_flops, CHOICES,
+)
 from utils.dataset import FineTuneEHRDataset, batcher  # noqa: E402
 from utils.engine import evaluate  # noqa: E402
 from utils.seed import set_random_seed  # noqa: E402
+from utils.device_helpers import dataloader_kwargs  # noqa: E402
 from model.supernet_transformer import TransformerSuper  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# Candidate helpers
+# Sampling helpers
 # ---------------------------------------------------------------------------
 
 def _cand_key(cand):
     return (cand["embed_dim"], cand["depth"], cand["mlp_ratio"], cand["num_heads"])
 
 
-def _valid(cand, vocab_size, max_adm, max_params, max_flops=None, flops_seq_len=512):
-    """Check constraint + parameter budget + FLOPs budget."""
+def _random_cand():
+    """Uniform sample one scalar config from CHOICES (no constraint check yet)."""
+    return {
+        "embed_dim": random.choice(CHOICES["embed_dim"]),
+        "depth": random.choice(CHOICES["depth"]),
+        "mlp_ratio": random.choice(CHOICES["mlp_ratio"]),
+        "num_heads": random.choice(CHOICES["num_heads"]),
+    }
+
+
+def _validate(cand, vocab_size, max_adm, max_params,
+              max_flops=None, flops_seq_len=512):
+    """Constraint + param budget + FLOPs budget. Returns (ok, n_params, n_flops)."""
     if cand["embed_dim"] % cand["num_heads"] != 0:
         return False, 0, 0
     internal = _to_internal_config(cand)
@@ -75,108 +101,178 @@ def _valid(cand, vocab_size, max_adm, max_params, max_flops=None, flops_seq_len=
     return True, n_params, n_flops
 
 
-def _random_cand():
-    return {
-        "embed_dim": random.choice(CHOICES["embed_dim"]),
-        "depth": random.choice(CHOICES["depth"]),
-        "mlp_ratio": random.choice(CHOICES["mlp_ratio"]),
-        "num_heads": random.choice(CHOICES["num_heads"]),
-    }
-
-
-def _mutate(parent, m_prob):
-    child = dict(parent)
-    for k in ("embed_dim", "depth", "mlp_ratio", "num_heads"):
-        if random.random() < m_prob:
-            child[k] = random.choice(CHOICES[k])
-    return child
-
-
-def _crossover(p1, p2):
-    child = {}
-    for k in ("embed_dim", "depth", "mlp_ratio", "num_heads"):
-        child[k] = random.choice([p1[k], p2[k]])
-    return child
-
-
-def _sample_random_valid(visited, vocab_size, max_adm, max_params,
-                         max_flops=None, flops_seq_len=512, max_tries=500):
-    for _ in range(max_tries):
+def _sample_unique_valid(visited, vocab_size, max_adm, max_params,
+                         max_flops=None, flops_seq_len=512, max_attempts=200):
+    """
+    Sample uniformly until we hit a valid, in-budget, unvisited config.
+    Returns (cand, internal, n_params, n_flops) or (None, ..., ..., ...)
+    if exhaustion (search space too tightly constrained).
+    """
+    for _ in range(max_attempts):
         cand = _random_cand()
-        if _cand_key(cand) in visited:
+        key = _cand_key(cand)
+        if key in visited:
             continue
-        ok, _, _ = _valid(cand, vocab_size, max_adm, max_params, max_flops, flops_seq_len)
+        ok, n_params, n_flops = _validate(
+            cand, vocab_size, max_adm, max_params,
+            max_flops=max_flops, flops_seq_len=flops_seq_len,
+        )
         if ok:
-            return cand
-    return None
-
-
-def _generate_children(parents, n_mut, n_cross, m_prob, visited,
-                       vocab_size, max_adm, max_params, max_flops=None,
-                       flops_seq_len=512, max_tries_each=100):
-    """Generate up to n_mut mutation + n_cross crossover children, all unique & valid."""
-    children = []
-
-    # Mutation
-    tries = 0
-    while len(children) < n_mut and tries < n_mut * max_tries_each:
-        tries += 1
-        parent = random.choice(parents)
-        child = _mutate(parent, m_prob)
-        key = _cand_key(child)
-        if key in visited:
-            continue
-        ok, _, _ = _valid(child, vocab_size, max_adm, max_params, max_flops, flops_seq_len)
-        if not ok:
-            continue
-        visited.add(key)
-        children.append(child)
-
-    # Crossover
-    tries = 0
-    while len(children) < n_mut + n_cross and tries < n_cross * max_tries_each:
-        tries += 1
-        if len(parents) < 2:
-            break
-        p1, p2 = random.sample(parents, 2)
-        child = _crossover(p1, p2)
-        key = _cand_key(child)
-        if key in visited:
-            continue
-        ok, _, _ = _valid(child, vocab_size, max_adm, max_params, max_flops, flops_seq_len)
-        if not ok:
-            continue
-        visited.add(key)
-        children.append(child)
-
-    return children
+            internal = _to_internal_config(cand)
+            return cand, internal, n_params, n_flops
+    return None, None, None, None
 
 
 # ---------------------------------------------------------------------------
-# Evaluation (reuse MAS _finetune_one_arch)
+# CLI
 # ---------------------------------------------------------------------------
 
-def _evaluate_candidates(cands, search_state, ckpt, train_loader, val_loader,
-                         device, args, vocab_size, max_adm, max_params, tag,
-                         max_flops=None, flops_seq_len=512):
-    """Finetune each candidate, append results to search_state. Respects budget."""
-    for i, cand in enumerate(cands):
-        if search_state["budget_remaining"] <= 0:
-            print(f"  Budget exhausted, stopping {tag} evaluation.")
-            break
+def parse_args():
+    p = argparse.ArgumentParser(description="Random search baseline for EHR Transformer NAS")
+    # Target
+    p.add_argument("--hospital", type=str, required=True)
+    p.add_argument("--task", type=str, required=True,
+                   choices=["death", "stay", "readmission"])
+    # Constraints
+    p.add_argument("--max_params", type=int, required=True)
+    p.add_argument("--max_flops", type=int, default=None,
+                   help="Maximum subnet FLOPs (computed at --flops_seq_len reference length)")
+    p.add_argument("--flops_seq_len", type=int, default=512,
+                   help="Reference sequence length for FLOPs estimation")
+    p.add_argument("--budget", type=int, default=20,
+                   help="Total number of architectures to finetune")
+    # Pretrained model
+    p.add_argument("--ckpt_path", type=str, default=None)
+    p.add_argument("--results_dir", type=str, default="./results")
+    # Pretrain hyperparams (used only if ckpt_path absent)
+    p.add_argument("--pretrain_epochs", type=int, default=50)
+    p.add_argument("--pretrain_patience", type=int, default=5)
+    p.add_argument("--embed_dim", type=int, default=256)
+    p.add_argument("--depth", type=int, default=8)
+    p.add_argument("--num_heads", type=int, default=8)
+    p.add_argument("--mlp_ratio", type=float, default=8)
+    # Finetune hyperparams
+    p.add_argument("--finetune_epochs", type=int, default=20)
+    p.add_argument("--finetune_patience", type=int, default=5)
+    p.add_argument("--top_k_epochs", type=int, default=3)
+    p.add_argument("--batch_size", type=int, default=32)
+    p.add_argument("--lr", type=float, default=1e-4)
+    p.add_argument("--weight_decay", type=float, default=1e-2)
+    p.add_argument("--max_grad_norm", type=float, default=1.0)
+    p.add_argument("--drop_rate", type=float, default=0.1)
+    p.add_argument("--attn_drop_rate", type=float, default=0.1)
+    p.add_argument("--drop_path_rate", type=float, default=0.1)
+    # Common
+    p.add_argument("--seed", type=int, default=123)
+    # GPU throughput knobs
+    p.add_argument("--num_workers", type=int, default=4,
+                   help="DataLoader workers (forced to 0 off-CUDA)")
+    p.add_argument("--cudnn_benchmark", action="store_true",
+                   help="Enable cuDNN benchmark (faster, nondeterministic)")
+    return p.parse_args()
 
-        ok, n_params, n_flops = _valid(cand, vocab_size, max_adm, max_params, max_flops, flops_seq_len)
-        if not ok:
-            print(f"  [{tag} {i+1}/{len(cands)}] INVALID, skipping: {cand}")
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+def main():
+    args = parse_args()
+    set_random_seed(args.seed, deterministic=not args.cudnn_benchmark)
+    np.random.seed(args.seed)
+    random.seed(args.seed)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device: {device}")
+    print(f"Target: {args.hospital} / {args.task}")
+    print(f"Budget: {args.budget}, max_params={args.max_params:,}")
+
+    # Resolve ckpt_path before chdir
+    if args.ckpt_path is not None and not os.path.isabs(args.ckpt_path):
+        orig_abs = os.path.abspath(args.ckpt_path)
+        if os.path.exists(orig_abs):
+            args.ckpt_path = orig_abs
+    os.chdir(_MAS_NAS_DIR)
+    print(f"Working directory: {os.getcwd()}")
+
+    # --- Data ---
+    data_root = Path(f"./data_process/{args.hospital}/{args.hospital}-processed")
+    full_data = pickle.load(open(data_root / "mimic.pkl", "rb"))
+    tokenizer = build_tokenizer(full_data, ["[PAD]", "[CLS]", "[MASK]"])
+    max_adm = full_data.groupby("SUBJECT_ID")["HADM_ID"].nunique().max()
+    vocab_size = len(tokenizer.vocab.id2word)
+    print(f"Vocab size: {vocab_size}, max admissions: {max_adm}")
+
+    # --- Pretrain or load checkpoint ---
+    if args.ckpt_path:
+        ckpt_path = args.ckpt_path
+        print(f"Using existing checkpoint: {ckpt_path}")
+    else:
+        print("\nNo checkpoint provided — running pretrain phase first...")
+        pretrain_data = pickle.load(open(data_root / "mimic_pretrain.pkl", "rb"))
+        args.output_dir = args.results_dir
+        ckpt_path = pretrain(args, tokenizer, pretrain_data, max_adm, device)
+    ckpt = torch.load(ckpt_path, map_location="cpu")
+    print(f"Loaded checkpoint: {ckpt_path}")
+
+    # --- Finetune loaders ---
+    train_data, val_data, test_data = pickle.load(open(data_root / "mimic_downstream.pkl", "rb"))
+    token_type = ["diag", "med", "lab", "pro"]
+    train_dataset = FineTuneEHRDataset(train_data, tokenizer, token_type, max_adm, args.task)
+    val_dataset = FineTuneEHRDataset(val_data, tokenizer, token_type, max_adm, args.task)
+    test_dataset = FineTuneEHRDataset(test_data, tokenizer, token_type, max_adm, args.task)
+
+    dl_kwargs = dataloader_kwargs(args.num_workers)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
+                              collate_fn=batcher(tokenizer, mode="finetune"),
+                              shuffle=True, **dl_kwargs)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size,
+                            collate_fn=batcher(tokenizer, mode="finetune"),
+                            shuffle=False, **dl_kwargs)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size,
+                             collate_fn=batcher(tokenizer, mode="finetune"),
+                             shuffle=False, **dl_kwargs)
+
+    # =========================================================================
+    # Random-search loop
+    # =========================================================================
+    search_state = {
+        "completed_experiments": [],
+        "budget_remaining": args.budget,
+    }
+    visited = set()
+
+    iteration = 0
+    consecutive_failures = 0
+    max_consecutive_failures = 3
+
+    while search_state["budget_remaining"] > 0:
+        iteration += 1
+        print(f"\n{'='*60}")
+        print(f"Iteration {iteration} — budget remaining: {search_state['budget_remaining']}")
+        print(f"{'='*60}")
+
+        cand, internal, n_params, n_flops = _sample_unique_valid(
+            visited, vocab_size, max_adm, args.max_params,
+            max_flops=args.max_flops, flops_seq_len=args.flops_seq_len,
+        )
+
+        if cand is None:
+            consecutive_failures += 1
+            print(f"  Sampling exhausted — could not find a valid unvisited config "
+                  f"({consecutive_failures}/{max_consecutive_failures})")
+            if consecutive_failures >= max_consecutive_failures:
+                print("  Search space appears exhausted, stopping early.")
+                break
             continue
 
-        internal = _to_internal_config(cand)
-        print(f"\n  [{tag} {i+1}/{len(cands)}] "
-              f"(budget remaining: {search_state['budget_remaining']}) "
-              f"embed_dim={cand['embed_dim']}, depth={cand['depth']}, "
+        consecutive_failures = 0
+        visited.add(_cand_key(cand))
+
+        print(f"  Sampled: embed_dim={cand['embed_dim']}, depth={cand['depth']}, "
               f"mlp_ratio={cand['mlp_ratio']}, num_heads={cand['num_heads']}, "
               f"params={n_params:,}, FLOPs={n_flops:,}")
 
+        # Finetune (shared with all other baselines)
         avg_val, best_model_sd = _finetune_one_arch(
             internal, ckpt, train_loader, val_loader, device, args
         )
@@ -200,235 +296,13 @@ def _evaluate_candidates(cands, search_state, ckpt, train_loader, val_loader,
         search_state.setdefault("_configs", []).append(internal)
         search_state["budget_remaining"] -= 1
 
-    _update_best_by_composite_rank(search_state)
-
-
-def _top_parents(search_state, k):
-    """Pick top-k parent configs by composite val rank."""
-    experiments = search_state["completed_experiments"]
-    if not experiments:
-        return []
-    df = pd.DataFrame(experiments)
-    ranks = pd.DataFrame()
-    for col in ["val_accuracy", "val_f1", "val_auroc", "val_auprc"]:
-        ranks[col] = df[col].rank(ascending=False, method="average")
-    df["avg_rank"] = ranks.mean(axis=1)
-    df = df.sort_values("avg_rank").head(k)
-
-    parents = []
-    for _, row in df.iterrows():
-        parents.append({
-            "embed_dim": int(row["embed_dim"]),
-            "depth": int(row["depth"]),
-            "mlp_ratio": int(row["mlp_ratio"]),
-            "num_heads": int(row["num_heads"]),
-        })
-    return parents
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
-def parse_args():
-    p = argparse.ArgumentParser(description="Evolution baseline for EHR Transformer NAS")
-
-    # Target
-    p.add_argument("--hospital", type=str, required=True)
-    p.add_argument("--task", type=str, required=True,
-                   choices=["death", "stay", "readmission"])
-
-    # Constraints
-    p.add_argument("--max_params", type=int, required=True)
-    p.add_argument("--max_flops", type=int, default=None,
-                   help="Maximum subnet FLOPs (computed at --flops_seq_len reference length)")
-    p.add_argument("--flops_seq_len", type=int, default=512,
-                   help="Reference sequence length for FLOPs estimation")
-    p.add_argument("--budget", type=int, default=20,
-                   help="Total number of architectures to finetune")
-
-    # Pretrained model (optional — if omitted, pretrain runs automatically)
-    p.add_argument("--ckpt_path", type=str, default=None)
-    p.add_argument("--results_dir", type=str, default="./results")
-
-    # Pretrain hyperparams (used when --ckpt_path not provided)
-    p.add_argument("--pretrain_epochs", type=int, default=50)
-    p.add_argument("--pretrain_patience", type=int, default=5)
-    p.add_argument("--embed_dim", type=int, default=256)
-    p.add_argument("--depth", type=int, default=8)
-    p.add_argument("--num_heads", type=int, default=8)
-    p.add_argument("--mlp_ratio", type=float, default=8)
-
-    # Finetune hyperparams
-    p.add_argument("--finetune_epochs", type=int, default=20)
-    p.add_argument("--finetune_patience", type=int, default=5)
-    p.add_argument("--top_k_epochs", type=int, default=3)
-    p.add_argument("--batch_size", type=int, default=32)
-    p.add_argument("--lr", type=float, default=1e-4)
-    p.add_argument("--weight_decay", type=float, default=1e-2)
-    p.add_argument("--max_grad_norm", type=float, default=1.0)
-    p.add_argument("--drop_rate", type=float, default=0.1)
-    p.add_argument("--attn_drop_rate", type=float, default=0.1)
-    p.add_argument("--drop_path_rate", type=float, default=0.1)
-
-    # Evolution-specific
-    p.add_argument("--population_num", type=int, default=8,
-                   help="Initial random population size")
-    p.add_argument("--select_num", type=int, default=4,
-                   help="Number of parents kept each generation")
-    p.add_argument("--mutation_num", type=int, default=4,
-                   help="Number of mutation children per generation")
-    p.add_argument("--crossover_num", type=int, default=4,
-                   help="Number of crossover children per generation")
-    p.add_argument("--m_prob", type=float, default=0.3,
-                   help="Per-scalar mutation probability")
-
-    p.add_argument("--seed", type=int, default=123)
-
-    return p.parse_args()
-
-
-def main():
-    args = parse_args()
-    set_random_seed(args.seed)
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
-    print(f"Target: {args.hospital} / {args.task}")
-    print(f"Budget: {args.budget} architectures, max_params={args.max_params:,}")
-    print(f"Evolution: population={args.population_num}, select={args.select_num}, "
-          f"mutation={args.mutation_num}, crossover={args.crossover_num}, "
-          f"m_prob={args.m_prob}")
-
-    # --- Load data ---
-    # Data and results paths in MAS-NAS are relative to the MAS-NAS directory,
-    # so chdir into it for consistency with `mas_search.py`. For a
-    # user-provided `--ckpt_path`, prefer: (1) the original cwd location if it
-    # exists, else (2) the MAS-NAS-relative location (matching mas_search.py).
-    if args.ckpt_path is not None and not os.path.isabs(args.ckpt_path):
-        orig_abs = os.path.abspath(args.ckpt_path)
-        if os.path.exists(orig_abs):
-            args.ckpt_path = orig_abs
-        # else: leave relative so it resolves under MAS-NAS after chdir
-    os.chdir(_MAS_NAS_DIR)
-    print(f"Working directory: {os.getcwd()}")
-
-    data_root = Path(f"./data_process/{args.hospital}/{args.hospital}-processed")
-    full_data_path = data_root / "mimic.pkl"
-    pretrain_data_path = data_root / "mimic_pretrain.pkl"
-    finetune_data_path = data_root / "mimic_downstream.pkl"
-
-    special_tokens = ["[PAD]", "[CLS]", "[MASK]"]
-    full_data = pickle.load(open(full_data_path, "rb"))
-    tokenizer = build_tokenizer(full_data, special_tokens)
-    max_adm = full_data.groupby("SUBJECT_ID")["HADM_ID"].nunique().max()
-    vocab_size = len(tokenizer.vocab.id2word)
-    print(f"Vocab size: {vocab_size}, max admissions: {max_adm}")
-
-    # --- Pretrain or load checkpoint ---
-    if args.ckpt_path is not None:
-        ckpt_path = args.ckpt_path
-        print(f"Using existing checkpoint: {ckpt_path}")
-    else:
-        print("\nNo checkpoint provided — running pretrain phase first...")
-        pretrain_data = pickle.load(open(pretrain_data_path, "rb"))
-        args.output_dir = args.results_dir
-        ckpt_path = pretrain(args, tokenizer, pretrain_data, max_adm, device)
-
-    ckpt = torch.load(ckpt_path, map_location="cpu")
-    print(f"Loaded checkpoint: {ckpt_path}")
-
-    # --- Prepare finetune data ---
-    train_data, val_data, test_data = pickle.load(open(finetune_data_path, "rb"))
-
-    token_type = ["diag", "med", "lab", "pro"]
-    train_dataset = FineTuneEHRDataset(train_data, tokenizer, token_type, max_adm, args.task)
-    val_dataset = FineTuneEHRDataset(val_data, tokenizer, token_type, max_adm, args.task)
-    test_dataset = FineTuneEHRDataset(test_data, tokenizer, token_type, max_adm, args.task)
-
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
-                              collate_fn=batcher(tokenizer, mode="finetune"), shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size,
-                            collate_fn=batcher(tokenizer, mode="finetune"), shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size,
-                             collate_fn=batcher(tokenizer, mode="finetune"), shuffle=False)
+        _update_best_by_composite_rank(search_state)
 
     # =========================================================================
-    # Evolution search loop
-    # =========================================================================
-    search_state = {
-        "completed_experiments": [],
-        "budget_remaining": args.budget,
-    }
-    visited = set()
-
-    # ----- Generation 0: random initial population -----
-    print(f"\n{'='*60}")
-    print("Generation 0: random initial population")
-    print(f"{'='*60}")
-
-    init_pop = []
-    init_size = min(args.population_num, args.budget)
-    for _ in range(init_size):
-        cand = _sample_random_valid(visited, vocab_size, max_adm, args.max_params,
-                                     args.max_flops, args.flops_seq_len)
-        if cand is None:
-            print("  Could not sample a valid random candidate; stopping init.")
-            break
-        visited.add(_cand_key(cand))
-        init_pop.append(cand)
-
-    _evaluate_candidates(init_pop, search_state, ckpt, train_loader, val_loader,
-                         device, args, vocab_size, max_adm, args.max_params,
-                         tag="random", max_flops=args.max_flops, flops_seq_len=args.flops_seq_len)
-
-    # ----- Subsequent generations: mutation + crossover -----
-    generation = 0
-    while search_state["budget_remaining"] > 0:
-        generation += 1
-        print(f"\n{'='*60}")
-        print(f"Generation {generation}: mutation + crossover "
-              f"(budget remaining: {search_state['budget_remaining']})")
-        print(f"{'='*60}")
-
-        parents = _top_parents(search_state, args.select_num)
-        if not parents:
-            print("  No parents available, stopping.")
-            break
-        print(f"  Parents (top-{len(parents)} by composite val rank):")
-        for p in parents:
-            print(f"    {p}")
-
-        budget = search_state["budget_remaining"]
-        # Split budget proportionally between mutation and crossover
-        total = args.mutation_num + args.crossover_num
-        if total == 0:
-            print("  mutation_num + crossover_num == 0, stopping.")
-            break
-        n_mut = min(args.mutation_num, budget)
-        n_cross = min(args.crossover_num, budget - n_mut)
-
-        children = _generate_children(
-            parents, n_mut, n_cross, args.m_prob, visited,
-            vocab_size, max_adm, args.max_params, args.max_flops, args.flops_seq_len,
-        )
-
-        if not children:
-            print("  No new children could be generated; stopping.")
-            break
-
-        _evaluate_candidates(children, search_state, ckpt, train_loader, val_loader,
-                             device, args, vocab_size, max_adm, args.max_params,
-                             tag=f"gen{generation}", max_flops=args.max_flops,
-                             flops_seq_len=args.flops_seq_len)
-
-    # =========================================================================
-    # Save search results (val only)
+    # Save search results
     # =========================================================================
     print(f"\n{'='*60}")
-    print("Evolution Search Complete")
+    print("Random Search Complete")
     print(f"{'='*60}")
 
     val_results = search_state["completed_experiments"]
@@ -452,16 +326,15 @@ def main():
     df.to_csv(csv_path, index=False)
     print(f"\nSaved {len(df)} val results to {csv_path}")
 
-    print(f"\nAll architectures (ranked by val):")
+    print(f"\nAll architectures (ranked by composite val rank):")
     display_cols = ["embed_dim", "depth", "mlp_ratio", "num_heads", "num_params",
                     "val_accuracy", "val_f1", "val_auroc", "val_auprc", "avg_rank"]
     print(df[display_cols].to_string(index=False))
 
     # =========================================================================
-    # Final test evaluation: best architecture by composite val rank
+    # Final test evaluation: best by composite val rank
     # =========================================================================
     best_row_info = df.iloc[0]
-
     best_model_sd = search_state.get("best_model_sd")
     best_config = search_state.get("best_config")
 
@@ -495,7 +368,6 @@ def main():
     model.load_state_dict(best_model_sd)
 
     test_metrics = evaluate(test_loader, model, device, retrain_config=best_config)
-
     print(f"\n  Test Results:")
     print(f"    Accuracy = {test_metrics['accuracy']:.4f}")
     print(f"    F1       = {test_metrics['f1']:.4f}")

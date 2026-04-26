@@ -20,7 +20,6 @@ Usage:
 """
 
 import argparse
-import copy
 import pickle
 from pathlib import Path
 
@@ -37,6 +36,7 @@ from torch.utils.data import DataLoader
 from utils.seed import set_random_seed
 from utils.dataset import PreTrainEHRDataset, FineTuneEHRDataset, batcher
 from utils.engine import sample_configs, train_one_epoch, evaluate_mlm
+from utils.device_helpers import dataloader_kwargs, snapshot_sd_cpu
 from model.supernet_transformer import TransformerSuper
 from run_pipeline import build_tokenizer, count_subnet_params, count_subnet_flops, CHOICES
 from agents.experiment_agent import _finetune_one_arch
@@ -84,6 +84,12 @@ def parse_args():
     p.add_argument("--results_dir", type=str, default="./results")
     p.add_argument("--flops_seq_len", type=int, default=512)
 
+    # GPU throughput knobs
+    p.add_argument("--num_workers", type=int, default=4,
+                   help="DataLoader workers (forced to 0 off-CUDA)")
+    p.add_argument("--cudnn_benchmark", action="store_true",
+                   help="Enable cuDNN benchmark (faster, nondeterministic)")
+
     return p.parse_args()
 
 
@@ -100,7 +106,7 @@ def _to_scalar(cfg):
     }
 
 
-def _make_pretrain_loaders(pretrain_data, tokenizer, max_adm, batch_size, seed):
+def _make_pretrain_loaders(pretrain_data, tokenizer, max_adm, batch_size, seed, num_workers):
     """90/10 train/val split of pretrain data (mirrors run_pipeline.pretrain)."""
     dataset = PreTrainEHRDataset(
         ehr_pretrain_data=pretrain_data,
@@ -116,13 +122,14 @@ def _make_pretrain_loaders(pretrain_data, tokenizer, max_adm, batch_size, seed):
         dataset, [n_train, n_val],
         generator=torch.Generator().manual_seed(seed),
     )
+    dl_kwargs = dataloader_kwargs(num_workers)
     train_loader = DataLoader(
         train_ds, batch_size=batch_size,
-        collate_fn=batcher(tokenizer), shuffle=True,
+        collate_fn=batcher(tokenizer), shuffle=True, **dl_kwargs,
     )
     val_loader = DataLoader(
         val_ds, batch_size=batch_size,
-        collate_fn=batcher(tokenizer), shuffle=False,
+        collate_fn=batcher(tokenizer), shuffle=False, **dl_kwargs,
     )
     return train_loader, val_loader
 
@@ -178,7 +185,7 @@ def pretrain_supernet(args, vocab_size, max_adm, train_loader, val_loader, devic
 
         if val_metrics["loss"] < best_val_loss:
             best_val_loss = val_metrics["loss"]
-            best_sd = copy.deepcopy(model.state_dict())
+            best_sd = snapshot_sd_cpu(model.state_dict())
             no_improve = 0
         else:
             no_improve += 1
@@ -192,7 +199,7 @@ def pretrain_supernet(args, vocab_size, max_adm, train_loader, val_loader, devic
     print(f"[SupernetPretrain] best val_loss={best_val_loss:.4f}")
 
     ckpt = {
-        "model_state_dict": copy.deepcopy(model.state_dict()),
+        "model_state_dict": snapshot_sd_cpu(model.state_dict()),
         "vocab_size": vocab_size,
         "embed_dim": args.embed_dim,
         "depth": args.depth,
@@ -252,7 +259,7 @@ def pretrain_single_arch(scalar_config, internal_config, args,
 
         if val_metrics["loss"] < best_val_loss:
             best_val_loss = val_metrics["loss"]
-            best_sd = copy.deepcopy(model.state_dict())
+            best_sd = snapshot_sd_cpu(model.state_dict())
             no_improve = 0
         else:
             no_improve += 1
@@ -266,7 +273,7 @@ def pretrain_single_arch(scalar_config, internal_config, args,
     print(f"  [TradPretrain] best val_loss={best_val_loss:.4f}")
 
     ckpt = {
-        "model_state_dict": copy.deepcopy(model.state_dict()),
+        "model_state_dict": snapshot_sd_cpu(model.state_dict()),
         "vocab_size": vocab_size,
         "embed_dim": scalar_config["embed_dim"],
         "depth": scalar_config["depth"],
@@ -355,7 +362,7 @@ def plot_regression_panel(df, output_path, hospital, task):
 # ---------------------------------------------------------------------------
 def main():
     args = parse_args()
-    set_random_seed(args.seed)
+    set_random_seed(args.seed, deterministic=not args.cudnn_benchmark)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
     print(f"Target: {args.hospital} / {args.task}   k = {args.k}")
@@ -376,20 +383,21 @@ def main():
 
     # --- Pretrain loaders (shared by both paths) ---
     pretrain_train_loader, pretrain_val_loader = _make_pretrain_loaders(
-        pretrain_data, tokenizer, max_adm, args.batch_size, args.seed,
+        pretrain_data, tokenizer, max_adm, args.batch_size, args.seed, args.num_workers,
     )
 
     # --- Finetune loaders ---
     token_type = ["diag", "med", "lab", "pro"]
     train_ds = FineTuneEHRDataset(train_data, tokenizer, token_type, max_adm, args.task)
     val_ds = FineTuneEHRDataset(val_data, tokenizer, token_type, max_adm, args.task)
+    ft_dl_kwargs = dataloader_kwargs(args.num_workers)
     train_loader = DataLoader(
         train_ds, batch_size=args.batch_size,
-        collate_fn=batcher(tokenizer, mode="finetune"), shuffle=True,
+        collate_fn=batcher(tokenizer, mode="finetune"), shuffle=True, **ft_dl_kwargs,
     )
     val_loader = DataLoader(
         val_ds, batch_size=args.batch_size,
-        collate_fn=batcher(tokenizer, mode="finetune"), shuffle=False,
+        collate_fn=batcher(tokenizer, mode="finetune"), shuffle=False, **ft_dl_kwargs,
     )
 
     # --- Sample K architectures (deterministic under seed) ---

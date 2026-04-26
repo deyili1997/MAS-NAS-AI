@@ -8,7 +8,6 @@ Dual role:
      search strategy ("exploration" or "exploitation") for the next round.
 """
 
-import copy
 import json
 import time
 
@@ -23,6 +22,7 @@ from utils.engine import train_one_epoch, evaluate
 from run_pipeline import count_subnet_params, count_subnet_flops
 from model.supernet_transformer import TransformerSuper
 from utils.tracer import get_tracer
+from utils.device_helpers import snapshot_sd_cpu
 
 
 def _to_internal_config(proposal):
@@ -94,7 +94,7 @@ def _finetune_one_arch(config, ckpt, train_loader, val_loader, device, args):
 
         if val_auprc > best_val_auprc:
             best_val_auprc = val_auprc
-            best_model_sd = copy.deepcopy(model.state_dict())
+            best_model_sd = snapshot_sd_cpu(model.state_dict())
             epochs_without_improve = 0
         else:
             epochs_without_improve += 1

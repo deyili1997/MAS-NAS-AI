@@ -25,6 +25,7 @@ from utils.seed import set_random_seed
 from utils.tokenizer import EHRTokenizer
 from utils.dataset import PreTrainEHRDataset, FineTuneEHRDataset, batcher
 from utils.engine import sample_configs, train_one_epoch, evaluate, evaluate_mlm
+from utils.device_helpers import dataloader_kwargs, snapshot_sd_cpu
 from model.supernet_transformer import TransformerSuper
 
 
@@ -74,6 +75,11 @@ def parse_args():
     p.add_argument("--flops_seq_len", type=int, default=512,
                    help="Reference sequence length for analytical FLOPs counting")
     p.add_argument("--output_dir", type=str, default="./results")
+    # GPU throughput knobs
+    p.add_argument("--num_workers", type=int, default=4,
+                   help="DataLoader workers (forced to 0 off-CUDA)")
+    p.add_argument("--cudnn_benchmark", action="store_true",
+                   help="Enable cuDNN benchmark (faster, nondeterministic)")
     return p.parse_args()
 
 
@@ -203,10 +209,11 @@ def pretrain(args, tokenizer, pretrain_data, max_adm, device):
     )
     print(f"Pretrain split: {n_train} train / {n_val} val")
 
+    dl_kwargs = dataloader_kwargs(args.num_workers)
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
-                              collate_fn=batcher(tokenizer), shuffle=True)
+                              collate_fn=batcher(tokenizer), shuffle=True, **dl_kwargs)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size,
-                            collate_fn=batcher(tokenizer), shuffle=False)
+                            collate_fn=batcher(tokenizer), shuffle=False, **dl_kwargs)
 
     vocab_size = len(tokenizer.vocab.id2word)
     model = TransformerSuper(
@@ -256,7 +263,7 @@ def pretrain(args, tokenizer, pretrain_data, max_adm, device):
 
         if val_metrics['loss'] < best_val_loss:
             best_val_loss = val_metrics['loss']
-            best_model_sd = copy.deepcopy(model.state_dict())
+            best_model_sd = snapshot_sd_cpu(model.state_dict())
             epochs_without_improve = 0
         else:
             epochs_without_improve += 1
@@ -329,12 +336,16 @@ def finetune_and_evaluate(args, tokenizer, train_data, val_data, test_data,
         val_dataset = FineTuneEHRDataset(val_data, tokenizer, token_type, max_adm, task)
         test_dataset = FineTuneEHRDataset(test_data, tokenizer, token_type, max_adm, task)
 
+        dl_kwargs = dataloader_kwargs(args.num_workers)
         train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
-                                  collate_fn=batcher(tokenizer, mode="finetune"), shuffle=True)
+                                  collate_fn=batcher(tokenizer, mode="finetune"),
+                                  shuffle=True, **dl_kwargs)
         val_loader = DataLoader(val_dataset, batch_size=args.batch_size,
-                                collate_fn=batcher(tokenizer, mode="finetune"), shuffle=False)
+                                collate_fn=batcher(tokenizer, mode="finetune"),
+                                shuffle=False, **dl_kwargs)
         test_loader = DataLoader(test_dataset, batch_size=args.batch_size,
-                                 collate_fn=batcher(tokenizer, mode="finetune"), shuffle=False)
+                                 collate_fn=batcher(tokenizer, mode="finetune"),
+                                 shuffle=False, **dl_kwargs)
 
         for arch_idx, config in enumerate(sampled_configs):
             print(f"\n  Arch {arch_idx+1}/{args.num_archs}: "
@@ -445,7 +456,7 @@ def finetune_and_evaluate(args, tokenizer, train_data, val_data, test_data,
 # ---------------------------------------------------------------------------
 def main():
     args = parse_args()
-    set_random_seed(args.seed)
+    set_random_seed(args.seed, deterministic=not args.cudnn_benchmark)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 

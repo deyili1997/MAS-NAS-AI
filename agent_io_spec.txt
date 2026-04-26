@@ -333,15 +333,46 @@ DATA FLOW DIAGRAM
 BASELINES (for comparison)
 ================================================================================
 
---- Baseline 0: Evolution (baselines/baseline0.py) -----
+--- Baseline 0: Random Search (baselines/baseline0.py) ---
+  Same: ckpt, search space, finetune eval, composite rank, budget, data loading
+  Different: no search intelligence at all — uniform random sampling
+  Loop: [sample random valid config → evaluate] × budget
+  Output CSVs: baseline0_search_<task>.csv, baseline0_best_<task>.csv
+
+--- Baseline 1: Evolution (baselines/baseline1.py) ---
   Same: ckpt, search space, finetune eval, composite rank, budget, data loading
   Different: no LLM, no historical context, no SHAP
   Loop: random init → [mutation + crossover → evaluate → select top-k] × N
-  Output CSVs: baseline0_search_<task>.csv, baseline0_best_<task>.csv
+  Output CSVs: baseline1_search_<task>.csv, baseline1_best_<task>.csv
 
---- Baseline 1: Single LLM (baselines/baseline1.py) ---
+--- Baseline 2: Single LLM (baselines/baseline2.py) ---
   Same: ckpt, search space, finetune eval, composite rank, budget, data loading
   Different: single LLM call per iteration (no multi-agent debate),
              no historical context, no SHAP, no strategy agent
   Loop: [LLM sees all past results → proposes 1 arch → evaluate] × budget
-  Output CSVs: baseline1_search_<task>.csv, baseline1_best_<task>.csv
+  Output CSVs: baseline2_search_<task>.csv, baseline2_best_<task>.csv
+
+--- Baseline 3: LLMatic-style QD (baselines/baseline3.py) ---
+  Same: ckpt, search space, finetune eval, composite rank, budget, data loading
+  Different: MAP-Elites quality-diversity archive niched in 2D BD space
+             (log_params, log_flops); LLM mutation/crossover with
+             curiosity-weighted prompts; no historical context, no SHAP
+  Loop: random init phase → [select-by-curiosity prompt + best-fitness parent
+        → LLM mutation (85%) or crossover (15%) → evaluate → archive update]
+  Output CSVs: baseline3_search_<task>.csv, baseline3_archive_<task>.csv,
+               baseline3_best_<task>.csv
+
+--- Baseline 4: CoLLM-NAS (baselines/baseline4.py) ---
+  Same: ckpt, search space, finetune eval, composite rank, budget, data loading
+  Different: two-LLM cascade — stateful Navigator (sees full history H,
+             outputs free-text strategy) + stateless Generator (sees only
+             current strategy, outputs candidate configs); no Critic, no QD
+             diversity, no historical context, no SHAP. Reference: §3.2.
+  Loop: S_0 ← Navigator(target, constraint)
+        for t in 1..T:
+            C_t ← Generator(S_{t-1})
+            evaluate legal & unvisited α_i; update best
+            if target reached: break
+            H ← H ∪ {(S_{t-1}, R_t)};  S_t ← Navigator(H)
+  Output CSVs: baseline4_search_<task>.csv, baseline4_best_<task>.csv
+  Output JSON: baseline4_strategies_<task>.json

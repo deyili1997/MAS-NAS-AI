@@ -51,11 +51,11 @@ def train_one_epoch(model: torch.nn.Module, criterion,
     pbar = tqdm(data_loader, desc=f"Epoch {epoch+1} [{mode}/{task}]", leave=True)
     for step, batch in enumerate(pbar, start=1):
         input_ids, token_types, adm_index, attn_mask, labels = batch
-        input_ids = input_ids.to(device)
-        token_types = token_types.to(device)
-        adm_index = adm_index.to(device)
-        attn_mask = attn_mask.to(device)
-        labels = labels.to(device)
+        input_ids = input_ids.to(device, non_blocking=True)
+        token_types = token_types.to(device, non_blocking=True)
+        adm_index = adm_index.to(device, non_blocking=True)
+        attn_mask = attn_mask.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True)
         
         if mode == 'super':
             config = sample_configs(choices=choices)
@@ -145,11 +145,11 @@ def evaluate_mlm(data_loader, model, device, config, ignore_index=-100):
 
     for batch in tqdm(data_loader, desc="Val MLM", leave=False):
         input_ids, token_types, adm_index, attn_mask, labels = batch
-        input_ids = input_ids.to(device)
-        token_types = token_types.to(device)
-        adm_index = adm_index.to(device)
-        attn_mask = attn_mask.to(device)
-        labels = labels.to(device)
+        input_ids = input_ids.to(device, non_blocking=True)
+        token_types = token_types.to(device, non_blocking=True)
+        adm_index = adm_index.to(device, non_blocking=True)
+        attn_mask = attn_mask.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True)
 
         outputs = model(
             input_ids=input_ids,
@@ -197,11 +197,11 @@ def evaluate(data_loader, model, device, retrain_config=None):
 
     for batch in tqdm(data_loader, desc="Evaluating", leave=False):
         input_ids, token_types, adm_index, attn_mask, labels = batch
-        input_ids = input_ids.to(device)
-        token_types = token_types.to(device)
-        adm_index = adm_index.to(device)
-        attn_mask = attn_mask.to(device)
-        labels = labels.to(device).long()
+        input_ids = input_ids.to(device, non_blocking=True)
+        token_types = token_types.to(device, non_blocking=True)
+        adm_index = adm_index.to(device, non_blocking=True)
+        attn_mask = attn_mask.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True).long()
 
         outputs = model(
             input_ids=input_ids,

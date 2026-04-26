@@ -39,6 +39,7 @@ from utils.seed import set_random_seed
 from utils.tokenizer import EHRTokenizer
 from utils.dataset import PreTrainEHRDataset, FineTuneEHRDataset, batcher
 from utils.engine import evaluate
+from utils.device_helpers import dataloader_kwargs
 from run_pipeline import build_tokenizer, pretrain, CHOICES
 from model.supernet_transformer import TransformerSuper
 from dataset_summary import summarize_dataset
@@ -309,6 +310,12 @@ def parse_args():
 
     p.add_argument("--seed", type=int, default=123)
 
+    # GPU throughput knobs
+    p.add_argument("--num_workers", type=int, default=4,
+                   help="DataLoader workers (forced to 0 off-CUDA)")
+    p.add_argument("--cudnn_benchmark", action="store_true",
+                   help="Enable cuDNN benchmark (faster, nondeterministic)")
+
     return p.parse_args()
 
 
@@ -322,7 +329,7 @@ def _compute_avg_rank(df):
 
 def main():
     args = parse_args()
-    set_random_seed(args.seed)
+    set_random_seed(args.seed, deterministic=not args.cudnn_benchmark)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
     print(f"Target: {args.hospital} / {args.task}")
@@ -380,12 +387,16 @@ def main():
     val_dataset = FineTuneEHRDataset(val_data, tokenizer, token_type, max_adm, args.task)
     test_dataset = FineTuneEHRDataset(test_data, tokenizer, token_type, max_adm, args.task)
 
+    dl_kwargs = dataloader_kwargs(args.num_workers)
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
-                              collate_fn=batcher(tokenizer, mode="finetune"), shuffle=True)
+                              collate_fn=batcher(tokenizer, mode="finetune"),
+                              shuffle=True, **dl_kwargs)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size,
-                            collate_fn=batcher(tokenizer, mode="finetune"), shuffle=False)
+                            collate_fn=batcher(tokenizer, mode="finetune"),
+                            shuffle=False, **dl_kwargs)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size,
-                             collate_fn=batcher(tokenizer, mode="finetune"), shuffle=False)
+                             collate_fn=batcher(tokenizer, mode="finetune"),
+                             shuffle=False, **dl_kwargs)
 
     # --- Initialize Anthropic client ---
     import anthropic
