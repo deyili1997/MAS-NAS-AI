@@ -36,12 +36,11 @@ from sklearn.metrics.pairwise import cosine_similarity
 from torch.utils.data import DataLoader
 
 from utils.seed import set_random_seed
-from utils.tokenizer import EHRTokenizer
-from utils.dataset import PreTrainEHRDataset, FineTuneEHRDataset, batcher
+from utils.dataset import FineTuneEHRDataset, batcher
 from utils.engine import evaluate
-from utils.device_helpers import dataloader_kwargs, pick_device, empty_cache
+from utils.device_helpers import dataloader_kwargs, pick_device
 from utils.task_registry import task_info, ALL_TASKS
-from run_pipeline import build_tokenizer, pretrain, CHOICES
+from run_pipeline import build_tokenizer, pretrain
 from model.supernet_transformer import TransformerSuper
 from dataset_summary import summarize_dataset
 
