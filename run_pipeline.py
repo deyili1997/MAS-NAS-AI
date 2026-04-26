@@ -25,7 +25,7 @@ from utils.seed import set_random_seed
 from utils.tokenizer import EHRTokenizer
 from utils.dataset import PreTrainEHRDataset, FineTuneEHRDataset, batcher
 from utils.engine import sample_configs, train_one_epoch, evaluate, evaluate_mlm
-from utils.device_helpers import dataloader_kwargs, snapshot_sd_cpu
+from utils.device_helpers import dataloader_kwargs, snapshot_sd_cpu, pick_device, empty_cache
 from utils.task_registry import task_info, ALL_TASKS, is_multilabel
 from model.supernet_transformer import TransformerSuper
 
@@ -514,7 +514,7 @@ def finetune_and_evaluate(args, tokenizer, ckpt_path, device):
 def main():
     args = parse_args()
     set_random_seed(args.seed, deterministic=not args.cudnn_benchmark)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = pick_device()
     print(f"Device: {device}")
 
     # --- Data paths ---

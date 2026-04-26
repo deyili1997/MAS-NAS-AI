@@ -71,7 +71,7 @@ from run_pipeline import (  # noqa: E402
 from utils.dataset import FineTuneEHRDataset, batcher  # noqa: E402
 from utils.engine import evaluate  # noqa: E402
 from utils.seed import set_random_seed  # noqa: E402
-from utils.device_helpers import dataloader_kwargs  # noqa: E402
+from utils.device_helpers import dataloader_kwargs, pick_device, empty_cache  # noqa: E402
 from utils.task_registry import task_info, ALL_TASKS  # noqa: E402
 from model.supernet_transformer import TransformerSuper  # noqa: E402
 
@@ -425,7 +425,7 @@ def main():
     if args.max_iterations is None:
         args.max_iterations = 2 * args.budget
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = pick_device()
     print(f"Device: {device}")
     print(f"Target: {args.hospital} / {args.task}")
     print(f"Budget: {args.budget}, max_iterations={args.max_iterations}, "
@@ -650,14 +650,15 @@ def main():
     df["avg_rank"] = val_rank.mean(axis=1)
     df_sorted = df.sort_values("avg_rank").reset_index(drop=True)
 
-    out_dir = Path(args.results_dir) / args.hospital
+    # Output layout: results/<hospital>/search/baseline4/<task>/{baseline4_search,baseline4_best}.csv + baseline4_strategies.json
+    out_dir = Path(args.results_dir) / args.hospital / "search" / "baseline4" / args.task
     out_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = out_dir / f"baseline4_search_{args.task}.csv"
+    csv_path = out_dir / "baseline4_search.csv"
     df_sorted.to_csv(csv_path, index=False)
     print(f"\nSaved {len(df_sorted)} val results to {csv_path}")
 
     # Strategies log (Navigator outputs per iteration)
-    strat_json_path = out_dir / f"baseline4_strategies_{args.task}.json"
+    strat_json_path = out_dir / "baseline4_strategies.json"
     # Also include per-iter result summaries
     strategies_with_history = []
     for entry in strategies_log:
@@ -744,7 +745,7 @@ def main():
     best_row["test_f1"] = test_metrics["f1"]
     best_row["test_auroc"] = test_metrics["auroc"]
     best_row["test_auprc"] = test_metrics["auprc"]
-    test_csv = out_dir / f"baseline4_best_{args.task}.csv"
+    test_csv = out_dir / "baseline4_best.csv"
     pd.DataFrame([best_row]).to_csv(test_csv, index=False)
     print(f"\n  Best architecture + test results saved to {test_csv}")
 

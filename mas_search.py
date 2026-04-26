@@ -39,7 +39,7 @@ from utils.seed import set_random_seed
 from utils.tokenizer import EHRTokenizer
 from utils.dataset import PreTrainEHRDataset, FineTuneEHRDataset, batcher
 from utils.engine import evaluate
-from utils.device_helpers import dataloader_kwargs
+from utils.device_helpers import dataloader_kwargs, pick_device, empty_cache
 from utils.task_registry import task_info, ALL_TASKS
 from run_pipeline import build_tokenizer, pretrain, CHOICES
 from model.supernet_transformer import TransformerSuper
@@ -303,7 +303,14 @@ def parse_args():
     p.add_argument("--finetune_patience", type=int, default=5)
     p.add_argument("--top_k_epochs", type=int, default=3,
                    help="Average test metrics from top-k validation epochs")
-    p.add_argument("--batch_size", type=int, default=32)
+    # NOTE: --batch_size is SHARED by both phases:
+    #   (a) Supernet MLM pretrain — only when --ckpt_path is omitted; routed
+    #       through run_pipeline.pretrain(), which reads args.batch_size.
+    #   (b) Finetune (cls) — every accepted subnet's train/val/test DataLoader.
+    # If reusing an existing --ckpt_path, only finetune actually consumes this.
+    p.add_argument("--batch_size", type=int, default=32,
+                   help="DataLoader batch size shared by pretrain (when "
+                        "--ckpt_path is absent) and finetune.")
     p.add_argument("--lr", type=float, default=1e-4)
     p.add_argument("--weight_decay", type=float, default=1e-2)
     p.add_argument("--max_grad_norm", type=float, default=1.0)
@@ -333,15 +340,16 @@ def _compute_avg_rank(df):
 def main():
     args = parse_args()
     set_random_seed(args.seed, deterministic=not args.cudnn_benchmark)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = pick_device()
     print(f"Device: {device}")
     print(f"Target: {args.hospital} / {args.task}")
     print(f"Budget: {args.budget} architectures, max_params={args.max_params:,}")
 
     # --- Initialize I/O tracer ---
-    output_dir = Path(args.results_dir) / args.hospital
+    # Output layout: results/<hospital>/search/mas/<task>/{mas_search.csv, mas_best.csv, agent_io_log.txt}
+    output_dir = Path(args.results_dir) / args.hospital / "search" / "mas" / args.task
     output_dir.mkdir(parents=True, exist_ok=True)
-    tracer = Tracer(str(output_dir / f"agent_io_log_{args.task}.txt"))
+    tracer = Tracer(str(output_dir / "agent_io_log.txt"))
     set_global_tracer(tracer)
     tracer.log_section("RUN CONFIGURATION")
     tracer.log_kv("hospital", args.hospital)
@@ -625,10 +633,10 @@ def main():
     df["avg_rank"] = val_rank.mean(axis=1)
     df = df.sort_values("avg_rank").reset_index(drop=True)
 
-    # Save all val results
-    output_dir = Path(args.results_dir) / args.hospital
+    # Save all val results — same dir as the tracer (results/<hospital>/search/mas/<task>/)
+    output_dir = Path(args.results_dir) / args.hospital / "search" / "mas" / args.task
     output_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = output_dir / f"mas_search_{args.task}.csv"
+    csv_path = output_dir / "mas_search.csv"
     df.to_csv(csv_path, index=False)
     print(f"\nSaved {len(df)} val results to {csv_path}")
 
@@ -707,7 +715,7 @@ def main():
     best_row["test_f1"] = test_metrics["f1"]
     best_row["test_auroc"] = test_metrics["auroc"]
     best_row["test_auprc"] = test_metrics["auprc"]
-    test_csv_path = output_dir / f"mas_best_{args.task}.csv"
+    test_csv_path = output_dir / "mas_best.csv"
     pd.DataFrame([best_row]).to_csv(test_csv_path, index=False)
     print(f"\n  Best architecture + test results saved to {test_csv_path}")
 

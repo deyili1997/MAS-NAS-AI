@@ -264,11 +264,13 @@ Source: mas_search.py
 
   Output:
     - Console: test accuracy, F1, AUROC, AUPRC
-    - CSV files:
-        results/<hospital>/mas_search_<task>.csv
+    - Files (all under results/<hospital>/search/mas/<task>/):
+        mas_search.csv
             All evaluated archs + val metrics, ranked by composite val rank
-        results/<hospital>/mas_best_<task>.csv
+        mas_best.csv
             Single row: best arch + val metrics + test metrics
+        agent_io_log.txt
+            Per-round Tracer log of every agent's input/output
 
 ================================================================================
 DATA FLOW DIAGRAM
@@ -332,25 +334,30 @@ DATA FLOW DIAGRAM
 ================================================================================
 BASELINES (for comparison)
 ================================================================================
+All per-baseline outputs land under results/<hospital>/search/<scheme>/<task>/.
+Filenames drop the redundant <task> suffix (it's already in the parent folder).
 
 --- Baseline 0: Random Search (baselines/baseline0.py) ---
   Same: ckpt, search space, finetune eval, composite rank, budget, data loading
   Different: no search intelligence at all — uniform random sampling
   Loop: [sample random valid config → evaluate] × budget
-  Output CSVs: baseline0_search_<task>.csv, baseline0_best_<task>.csv
+  Output (under results/<hospital>/search/baseline0/<task>/):
+      baseline0_search.csv, baseline0_best.csv
 
 --- Baseline 1: Evolution (baselines/baseline1.py) ---
   Same: ckpt, search space, finetune eval, composite rank, budget, data loading
   Different: no LLM, no historical context, no SHAP
   Loop: random init → [mutation + crossover → evaluate → select top-k] × N
-  Output CSVs: baseline1_search_<task>.csv, baseline1_best_<task>.csv
+  Output (under results/<hospital>/search/baseline1/<task>/):
+      baseline1_search.csv, baseline1_best.csv
 
 --- Baseline 2: Single LLM (baselines/baseline2.py) ---
   Same: ckpt, search space, finetune eval, composite rank, budget, data loading
   Different: single LLM call per iteration (no multi-agent debate),
              no historical context, no SHAP, no strategy agent
   Loop: [LLM sees all past results → proposes 1 arch → evaluate] × budget
-  Output CSVs: baseline2_search_<task>.csv, baseline2_best_<task>.csv
+  Output (under results/<hospital>/search/baseline2/<task>/):
+      baseline2_search.csv, baseline2_best.csv
 
 --- Baseline 3: LLMatic-style QD (baselines/baseline3.py) ---
   Same: ckpt, search space, finetune eval, composite rank, budget, data loading
@@ -359,8 +366,8 @@ BASELINES (for comparison)
              curiosity-weighted prompts; no historical context, no SHAP
   Loop: random init phase → [select-by-curiosity prompt + best-fitness parent
         → LLM mutation (85%) or crossover (15%) → evaluate → archive update]
-  Output CSVs: baseline3_search_<task>.csv, baseline3_archive_<task>.csv,
-               baseline3_best_<task>.csv
+  Output (under results/<hospital>/search/baseline3/<task>/):
+      baseline3_search.csv, baseline3_archive.csv, baseline3_best.csv
 
 --- Baseline 4: CoLLM-NAS (baselines/baseline4.py) ---
   Same: ckpt, search space, finetune eval, composite rank, budget, data loading
@@ -374,5 +381,29 @@ BASELINES (for comparison)
             evaluate legal & unvisited α_i; update best
             if target reached: break
             H ← H ∪ {(S_{t-1}, R_t)};  S_t ← Navigator(H)
-  Output CSVs: baseline4_search_<task>.csv, baseline4_best_<task>.csv
-  Output JSON: baseline4_strategies_<task>.json
+  Output (under results/<hospital>/search/baseline4/<task>/):
+      baseline4_search.csv, baseline4_best.csv, baseline4_strategies.json
+
+================================================================================
+GLOBAL OUTPUT LAYOUT
+================================================================================
+results/
+├── shap_analysis/<hospital>/<task>/...     (SHAP cross-hospital analysis)
+└── <hospital>/
+    ├── dataset_summary.csv                 (cross-hospital signature)
+    ├── metadata.csv                        (cross-hospital arch×task records)
+    ├── checkpoint_mlm/mlm_model.pt         (supernet pretrain ckpt)
+    ├── search/<scheme>/<task>/             (one folder per (scheme, task) pair)
+    │   ├── mas/<task>/{mas_search,mas_best}.csv + agent_io_log.txt
+    │   ├── baseline0/<task>/{baseline0_search,baseline0_best}.csv
+    │   ├── baseline1/<task>/{baseline1_search,baseline1_best}.csv
+    │   ├── baseline2/<task>/{baseline2_search,baseline2_best}.csv
+    │   ├── baseline3/<task>/{baseline3_search,baseline3_archive,baseline3_best}.csv
+    │   └── baseline4/<task>/{baseline4_search,baseline4_best}.csv
+    │                       + baseline4_strategies.json
+    └── regression/<task>/                  (run_regression.py: AutoFormer vs Trad)
+        ├── autoformer_results.csv
+        ├── traditional_results.csv
+        ├── results.csv
+        ├── pearson_summary.csv
+        └── regression_panel.png

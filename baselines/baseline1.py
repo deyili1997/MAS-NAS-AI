@@ -50,7 +50,7 @@ from run_pipeline import build_tokenizer, pretrain, count_subnet_params, count_s
 from utils.dataset import FineTuneEHRDataset, batcher  # noqa: E402
 from utils.engine import evaluate  # noqa: E402
 from utils.seed import set_random_seed  # noqa: E402
-from utils.device_helpers import dataloader_kwargs  # noqa: E402
+from utils.device_helpers import dataloader_kwargs, pick_device, empty_cache  # noqa: E402
 from utils.task_registry import task_info, ALL_TASKS  # noqa: E402
 from model.supernet_transformer import TransformerSuper  # noqa: E402
 
@@ -308,7 +308,7 @@ def main():
     random.seed(args.seed)
     np.random.seed(args.seed)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = pick_device()
     print(f"Device: {device}")
     print(f"Target: {args.hospital} / {args.task}")
     print(f"Budget: {args.budget} architectures, max_params={args.max_params:,}")
@@ -467,9 +467,10 @@ def main():
     df["avg_rank"] = val_rank.mean(axis=1)
     df = df.sort_values("avg_rank").reset_index(drop=True)
 
-    output_dir = Path(args.results_dir) / args.hospital
+    # Output layout: results/<hospital>/search/baseline1/<task>/{baseline1_search,baseline1_best}.csv
+    output_dir = Path(args.results_dir) / args.hospital / "search" / "baseline1" / args.task
     output_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = output_dir / f"baseline1_search_{args.task}.csv"
+    csv_path = output_dir / "baseline1_search.csv"
     df.to_csv(csv_path, index=False)
     print(f"\nSaved {len(df)} val results to {csv_path}")
 
@@ -530,7 +531,7 @@ def main():
     best_row["test_f1"] = test_metrics["f1"]
     best_row["test_auroc"] = test_metrics["auroc"]
     best_row["test_auprc"] = test_metrics["auprc"]
-    test_csv_path = output_dir / f"baseline1_best_{args.task}.csv"
+    test_csv_path = output_dir / "baseline1_best.csv"
     pd.DataFrame([best_row]).to_csv(test_csv_path, index=False)
     print(f"\n  Best architecture + test results saved to {test_csv_path}")
 

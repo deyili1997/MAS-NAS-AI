@@ -36,7 +36,7 @@ from torch.utils.data import DataLoader
 from utils.seed import set_random_seed
 from utils.dataset import PreTrainEHRDataset, FineTuneEHRDataset, batcher
 from utils.engine import sample_configs, train_one_epoch, evaluate_mlm
-from utils.device_helpers import dataloader_kwargs, snapshot_sd_cpu
+from utils.device_helpers import dataloader_kwargs, snapshot_sd_cpu, pick_device, empty_cache
 from utils.task_registry import task_info, ALL_TASKS
 from model.supernet_transformer import TransformerSuper
 from run_pipeline import build_tokenizer, count_subnet_params, count_subnet_flops, CHOICES
@@ -210,8 +210,7 @@ def pretrain_supernet(args, vocab_size, max_adm, train_loader, val_loader, devic
         "max_adm_num": max_adm,
     }
     del model, optimizer
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    empty_cache()
     return ckpt
 
 
@@ -284,8 +283,7 @@ def pretrain_single_arch(scalar_config, internal_config, args,
         "max_adm_num": max_adm,
     }
     del model, optimizer
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    empty_cache()
     return ckpt
 
 
@@ -365,7 +363,7 @@ def plot_regression_panel(df, output_path, hospital, task):
 def main():
     args = parse_args()
     set_random_seed(args.seed, deterministic=not args.cudnn_benchmark)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = pick_device()
     print(f"Device: {device}")
     print(f"Target: {args.hospital} / {args.task}   k = {args.k}")
 
@@ -414,7 +412,8 @@ def main():
               f"mlp={sc['mlp_ratio']:<2} heads={sc['num_heads']}")
 
     # --- Output dir ---
-    out_dir = Path(args.results_dir) / args.hospital / f"regression_{args.task}"
+    # Output layout: results/<hospital>/regression/<task>/{...csv, regression_panel.png}
+    out_dir = Path(args.results_dir) / args.hospital / "regression" / args.task
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # =======================================================================
@@ -458,8 +457,7 @@ def main():
         })
 
     del supernet_ckpt
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    empty_cache()
 
     af_df = pd.DataFrame(autoformer_rows)
     af_df.to_csv(out_dir / "autoformer_results.csv", index=False)
@@ -505,8 +503,7 @@ def main():
 
         # Free per-arch pretrain ckpt (delete, per user decision)
         del trad_ckpt
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        empty_cache()
 
     tr_df = pd.DataFrame(traditional_rows)
     tr_df.to_csv(out_dir / "traditional_results.csv", index=False)
