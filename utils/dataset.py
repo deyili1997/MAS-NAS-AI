@@ -2,7 +2,10 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 import numpy as np
+import pandas as pd
 from pandas.arrays import ArrowStringArray
+
+from utils.task_registry import task_info
 
 class PreTrainEHRDataset(Dataset):
     def __init__(self, ehr_pretrain_data, tokenizer, token_type, mask_rate, max_adm_num, skip_transform=False):
@@ -130,10 +133,23 @@ class PreTrainEHRDataset(Dataset):
 
 class FineTuneEHRDataset(PreTrainEHRDataset):
     def __init__(self, ehr_finetune_data, tokenizer, token_type, max_adm_num, task):
-        super().__init__(ehr_finetune_data, tokenizer, token_type, mask_rate=0.15, 
+        super().__init__(ehr_finetune_data, tokenizer, token_type, mask_rate=0.15,
                          max_adm_num=max_adm_num, skip_transform=True)
         self.task = task
-        
+        self._task_info = task_info(task)
+        self.task_type = self._task_info["type"]   # "binary" or "multilabel"
+
+        # For multilabel tasks: drop rows where the original window column is NaN
+        # (no future admission within the prediction horizon → no signal).
+        if self.task_type == "multilabel":
+            filter_col = self._task_info["filter_col"]
+            n_before = len(ehr_finetune_data)
+            ehr_finetune_data = ehr_finetune_data[ehr_finetune_data[filter_col].notna()]
+            n_after = len(ehr_finetune_data)
+            if n_after < n_before:
+                print(f"[FineTuneEHRDataset/{task}] dropped {n_before - n_after} "
+                      f"rows with NaN '{filter_col}' (kept {n_after}).")
+
         def _transform_finetune_data(data):
             hadm_records = {}
             labels = {}
@@ -148,7 +164,7 @@ class FineTuneEHRDataset(PreTrainEHRDataset):
                     if "med" in token_type:
                         admission.append(list(row['NDC']))
                     if "lab" in token_type:
-                        admission.append(list(row['LAB_TEST'])) 
+                        admission.append(list(row['LAB_TEST']))
                     if "pro" in token_type:
                         admission.append(list(row['PRO_CODE']))
                     patient.append(admission)
@@ -156,18 +172,22 @@ class FineTuneEHRDataset(PreTrainEHRDataset):
                     # note that one patient records are transformed into multiple samples
                     # one sample represents all previous admissions until the current admission
                     hadm_records[hadm_id] = list(patient)
-                    labels[hadm_id] = [row["DEATH"], row["STAY_DAYS"], row["READMISSION_3M"]]
+                    if self.task_type == "binary":
+                        labels[hadm_id] = [row["DEATH"], row["STAY_DAYS"], row["READMISSION_3M"]]
+                    else:  # multilabel
+                        # row[label_col] is a length-N_PHENO 0/1 list
+                        labels[hadm_id] = list(row[self._task_info["label_col"]])
             return hadm_records, labels
 
         self.records, self.labels = _transform_finetune_data(ehr_finetune_data)
-    
+
     def __getitem__(self, idx): # return tokenized input_ids, token_types, adm_index, age_sex, labels
         hadm_id = list(self.records.keys())[idx]
         admissions = self.records[hadm_id]
         input_ids = [self.cls_token_id]
         token_types = [self.token_type_id_dict['[CLS]']]  # token type for CLS token
         adm_index = [self.cls_adm_index]
-        
+
         for adm_i, adm in enumerate(admissions, start=1): # 0 is for [PAD]
             for type_i, codes in enumerate(adm):
                 code_type = self.token_type[type_i]
@@ -191,6 +211,9 @@ class FineTuneEHRDataset(PreTrainEHRDataset):
         elif self.task == "readmission":
             # predict if the patient will be readmitted within 1 month
             labels = torch.tensor([self.labels[hadm_id][2]]).float()
+        elif self.task_type == "multilabel":
+            # length-N_PHENO float vector (0/1)
+            labels = torch.tensor(self.labels[hadm_id], dtype=torch.float)
         else:
             raise ValueError(f"Unknown task: {self.task}")
 

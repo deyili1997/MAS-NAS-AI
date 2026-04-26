@@ -40,6 +40,7 @@ from utils.tokenizer import EHRTokenizer
 from utils.dataset import PreTrainEHRDataset, FineTuneEHRDataset, batcher
 from utils.engine import evaluate
 from utils.device_helpers import dataloader_kwargs
+from utils.task_registry import task_info, ALL_TASKS
 from run_pipeline import build_tokenizer, pretrain, CHOICES
 from model.supernet_transformer import TransformerSuper
 from dataset_summary import summarize_dataset
@@ -259,7 +260,9 @@ def parse_args():
     # Target
     p.add_argument("--hospital", type=str, required=True, help="Target hospital name")
     p.add_argument("--task", type=str, required=True,
-                   choices=["death", "stay", "readmission"], help="Downstream task")
+                   choices=ALL_TASKS,
+                   help=("Downstream task. Binary: death/stay/readmission. "
+                         "Multilabel (18 phenotypes): next_diag_6m_pheno, next_diag_12m_pheno."))
 
     # Constraints
     p.add_argument("--max_params", type=int, required=True,
@@ -356,7 +359,9 @@ def main():
     data_root = Path(f"./data_process/{args.hospital}/{args.hospital}-processed")
     full_data_path = data_root / "mimic.pkl"
     pretrain_data_path = data_root / "mimic_pretrain.pkl"
-    finetune_data_path = data_root / "mimic_downstream.pkl"
+    # Per-task split — binary tasks share mimic_downstream.pkl; multilabel
+    # tasks each have their own pkl produced by MIMIC-IV.ipynb.
+    finetune_data_path = data_root / task_info(args.task)["data_pkl"]
 
     special_tokens = ["[PAD]", "[CLS]", "[MASK]"]
     full_data = pickle.load(open(full_data_path, "rb"))
@@ -497,6 +502,7 @@ def main():
                 model=args.model,
                 strategy=strategy,
                 max_flops=args.max_flops,
+                num_classes=task_info(args.task)["num_classes"],
                 flops_seq_len=args.flops_seq_len,
             )
 
@@ -654,9 +660,10 @@ def main():
           f"depth={best_row_info['depth']}, "
           f"params={best_row_info['num_params']:,}")
 
-    # Build model and load best weights
+    # Build model and load best weights — num_classes routed via task registry
+    info = task_info(args.task)
     model = TransformerSuper(
-        num_classes=2,
+        num_classes=info["num_classes"],
         vocab_size=ckpt["vocab_size"],
         embed_dim=ckpt["embed_dim"],
         mlp_ratio=ckpt["mlp_ratio"],
@@ -671,7 +678,8 @@ def main():
     ).to(device)
     model.load_state_dict(best_model_sd)
 
-    test_metrics = evaluate(test_loader, model, device, retrain_config=best_config)
+    test_metrics = evaluate(test_loader, model, device, retrain_config=best_config,
+                            task_type=info["type"])
 
     print(f"\n  Test Results:")
     print(f"    Accuracy = {test_metrics['accuracy']:.4f}")

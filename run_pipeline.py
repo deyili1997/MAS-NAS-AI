@@ -26,6 +26,7 @@ from utils.tokenizer import EHRTokenizer
 from utils.dataset import PreTrainEHRDataset, FineTuneEHRDataset, batcher
 from utils.engine import sample_configs, train_one_epoch, evaluate, evaluate_mlm
 from utils.device_helpers import dataloader_kwargs, snapshot_sd_cpu
+from utils.task_registry import task_info, ALL_TASKS, is_multilabel
 from model.supernet_transformer import TransformerSuper
 
 
@@ -39,7 +40,7 @@ CHOICES = {
     "depth": [2, 4, 8],
 }
 
-TASKS = ["death", "stay", "readmission"]
+TASKS = ALL_TASKS  # imported from task_registry
 
 
 def parse_args():
@@ -62,8 +63,10 @@ def parse_args():
     p.add_argument("--attn_drop_rate", type=float, default=0.1)
     p.add_argument("--drop_path_rate", type=float, default=0.1)
     p.add_argument("--tasks", nargs="+", default=["death", "stay", "readmission"],
-                   choices=["death", "stay", "readmission"],
-                   help="Downstream tasks to finetune on (default: all three)")
+                   choices=ALL_TASKS,
+                   help=("Downstream tasks to finetune on. Binary: death/stay/"
+                         "readmission. Multilabel (18 phenotypes): "
+                         "next_diag_6m_pheno, next_diag_12m_pheno."))
     p.add_argument("--num_archs", type=int, default=10,
                    help="Number of random architectures to sample for finetuning")
     p.add_argument("--pretrain_patience", type=int, default=5,
@@ -121,7 +124,7 @@ def count_subnet_params(config, vocab_size, num_classes=2, type_vocab_size=7, ma
     return params
 
 
-def count_subnet_flops(config, flops_seq_len, super_embed_dim=256):
+def count_subnet_flops(config, flops_seq_len, super_embed_dim=256, num_classes=2):
     """
     Analytically estimate FLOPs for a forward pass through a subnet.
 
@@ -134,6 +137,8 @@ def count_subnet_flops(config, flops_seq_len, super_embed_dim=256):
     the *sample* embed_dim ``d`` to ``3 × super_embed_dim``, and the output
     projection maps ``super_embed_dim → d``.  Each attention head therefore
     has dimension ``super_embed_dim / num_heads``, **not** a fixed 64.
+
+    ``num_classes`` only enters the (negligible) classification-head FLOPs.
     """
     d = config["embed_dim"][0]
     depth = config["layer_num"]
@@ -165,7 +170,7 @@ def count_subnet_flops(config, flops_seq_len, super_embed_dim=256):
         flops += 2 * L * ffn_dim * d
 
     # Classification head (negligible but included for completeness)
-    flops += 2 * d * 2  # num_classes = 2
+    flops += 2 * d * num_classes
 
     return flops
 
@@ -299,8 +304,58 @@ def pretrain(args, tokenizer, pretrain_data, max_adm, device):
 # ---------------------------------------------------------------------------
 # Phase 2: Finetune sampled architectures
 # ---------------------------------------------------------------------------
-def finetune_and_evaluate(args, tokenizer, train_data, val_data, test_data,
-                          ckpt_path, device):
+def _label_entropy_for_task(train_data, task):
+    """Compute (binary) label entropy. For multilabel tasks, returns the mean
+    of per-class binary entropies. Mirrors the old binary-entropy semantics so
+    downstream metadata.csv 'label_entropy' column stays comparable."""
+    info = task_info(task)
+    if info["type"] == "binary":
+        if task == "death":
+            y = train_data["DEATH"].astype(float).values
+        elif task == "stay":
+            y = (train_data["STAY_DAYS"] > 7).astype(float).values
+        elif task == "readmission":
+            y = train_data["READMISSION_3M"].astype(float).values
+        else:
+            raise ValueError(f"binary task '{task}' has no label rule registered")
+        counts = np.bincount(y.astype(int))
+        probs = counts / counts.sum()
+        probs = probs[probs > 0]
+        return float(-np.sum(probs * np.log2(probs)))
+
+    # Multilabel: per-class binary entropy, then mean.
+    label_col = info["label_col"]
+    sub = train_data[train_data[info["filter_col"]].notna()]
+    if len(sub) == 0:
+        return 0.0
+    arr = np.array([list(v) for v in sub[label_col].values], dtype=int)  # [N, C]
+    ents = []
+    for c in range(arr.shape[1]):
+        col = arr[:, c]
+        counts = np.bincount(col, minlength=2)
+        probs = counts / counts.sum()
+        probs = probs[probs > 0]
+        if len(probs) == 0:
+            ents.append(0.0)
+        else:
+            ents.append(float(-np.sum(probs * np.log2(probs))))
+    return float(np.mean(ents))
+
+
+def _load_task_split(args, task):
+    """Resolve the right (train, val, test) pkl for a task. For binary tasks
+    they all share mimic_downstream.pkl; multilabel tasks each have their own
+    pkl created by MIMIC-IV.ipynb."""
+    info = task_info(task)
+    pkl_name = info["data_pkl"]
+    pkl_path = Path(f"./data_process/{args.hospital}/{args.hospital}-processed") / pkl_name
+    return pickle.load(open(pkl_path, "rb"))
+
+
+def finetune_and_evaluate(args, tokenizer, ckpt_path, device):
+    """Phase 2 — for each task in args.tasks: load that task's pkl, sample N
+    architectures, finetune each, record metrics. Multilabel tasks build the
+    head with task_num_classes (18) and use BCE + macro-averaged metrics."""
     print("\n" + "=" * 60)
     print(f"Phase 2: Finetune & Evaluate — {args.hospital}")
     print("=" * 60)
@@ -318,19 +373,17 @@ def finetune_and_evaluate(args, tokenizer, train_data, val_data, test_data,
 
     for task in args.tasks:
         print(f"\n--- Task: {task} ---")
+        info = task_info(task)
+        task_type = info["type"]
+        num_classes = info["num_classes"]
 
-        # Compute label entropy for this task
-        if task == "death":
-            labels = train_data["DEATH"].astype(float).values
-        elif task == "stay":
-            labels = (train_data["STAY_DAYS"] > 7).astype(float).values
-        elif task == "readmission":
-            labels = train_data["READMISSION_3M"].astype(float).values
-        counts = np.bincount(labels.astype(int))
-        probs = counts / counts.sum()
-        probs = probs[probs > 0]
-        label_entropy = float(-np.sum(probs * np.log2(probs)))
-        print(f"  Label entropy: {label_entropy:.4f}")
+        # Load the right split for this task.
+        train_data, val_data, test_data = _load_task_split(args, task)
+
+        # Compute label entropy for this task.
+        label_entropy = _label_entropy_for_task(train_data, task)
+        print(f"  Label entropy: {label_entropy:.4f}  ({task_type}, "
+              f"{num_classes} classes)")
 
         train_dataset = FineTuneEHRDataset(train_data, tokenizer, token_type, max_adm, task)
         val_dataset = FineTuneEHRDataset(val_data, tokenizer, token_type, max_adm, task)
@@ -356,7 +409,7 @@ def finetune_and_evaluate(args, tokenizer, train_data, val_data, test_data,
 
             # build fresh model and load pretrained weights
             model = TransformerSuper(
-                num_classes=2,
+                num_classes=num_classes,
                 vocab_size=vocab_size,
                 embed_dim=args.embed_dim,
                 mlp_ratio=args.mlp_ratio,
@@ -379,7 +432,8 @@ def finetune_and_evaluate(args, tokenizer, train_data, val_data, test_data,
             model.load_state_dict(model_sd)
 
             optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-            criterion = torch.nn.CrossEntropyLoss()
+            criterion = (torch.nn.BCEWithLogitsLoss() if task_type == "multilabel"
+                         else torch.nn.CrossEntropyLoss())
 
             # Track per-epoch: (val_auprc, model_state_dict, test_metrics)
             epoch_records = []
@@ -391,10 +445,13 @@ def finetune_and_evaluate(args, tokenizer, train_data, val_data, test_data,
                     model=model, criterion=criterion, data_loader=train_loader,
                     optimizer=optimizer, device=device, epoch=epoch,
                     mode="retrain", retrain_config=config, task="cls",
+                    task_type=task_type,
                     max_grad_norm=args.max_grad_norm,
                 )
-                val_metrics = evaluate(val_loader, model, device, retrain_config=config)
-                test_metrics = evaluate(test_loader, model, device, retrain_config=config)
+                val_metrics = evaluate(val_loader, model, device, retrain_config=config,
+                                       task_type=task_type)
+                test_metrics = evaluate(test_loader, model, device, retrain_config=config,
+                                        task_type=task_type)
 
                 val_auprc = val_metrics['auprc']
                 epoch_records.append((val_auprc, test_metrics))
@@ -437,7 +494,7 @@ def finetune_and_evaluate(args, tokenizer, train_data, val_data, test_data,
                 "depth": config["layer_num"],
                 "mlp_ratio": config["mlp_ratio"][0],
                 "num_heads": config["num_heads"][0],
-                "num_params": count_subnet_params(config, vocab_size, num_classes=2, max_adm=max_adm),
+                "num_params": count_subnet_params(config, vocab_size, num_classes=num_classes, max_adm=max_adm),
                 "flops": count_subnet_flops(config, args.flops_seq_len),
                 "accuracy": avg_test["accuracy"],
                 "f1": avg_test["f1"],
@@ -464,24 +521,21 @@ def main():
     data_root = Path(f"./data_process/{args.hospital}/{args.hospital}-processed")
     full_data_path = data_root / "mimic.pkl"
     pretrain_data_path = data_root / "mimic_pretrain.pkl"
-    finetune_data_path = data_root / "mimic_downstream.pkl"
 
-    # --- Load data ---
+    # --- Load shared data (full vocab + pretrain split) ---
     special_tokens = ["[PAD]", "[CLS]", "[MASK]"]
     full_data = pickle.load(open(full_data_path, "rb"))
     tokenizer = build_tokenizer(full_data, special_tokens)
     max_adm = full_data.groupby("SUBJECT_ID")["HADM_ID"].nunique().max()
     print(f"Max admissions per patient: {max_adm}")
     pretrain_data = pickle.load(open(pretrain_data_path, "rb"))
-    train_data, val_data, test_data = pickle.load(open(finetune_data_path, "rb"))
 
     # --- Phase 1: Pretrain ---
     ckpt_path = pretrain(args, tokenizer, pretrain_data, max_adm, device)
 
     # --- Phase 2: Finetune & Evaluate ---
-    results = finetune_and_evaluate(
-        args, tokenizer, train_data, val_data, test_data, ckpt_path, device
-    )
+    # finetune_and_evaluate loads each task's split internally via task_registry.
+    results = finetune_and_evaluate(args, tokenizer, ckpt_path, device)
 
     # --- Save metadata ---
     output_dir = Path(args.output_dir) / args.hospital

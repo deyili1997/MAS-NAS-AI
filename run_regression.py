@@ -37,6 +37,7 @@ from utils.seed import set_random_seed
 from utils.dataset import PreTrainEHRDataset, FineTuneEHRDataset, batcher
 from utils.engine import sample_configs, train_one_epoch, evaluate_mlm
 from utils.device_helpers import dataloader_kwargs, snapshot_sd_cpu
+from utils.task_registry import task_info, ALL_TASKS
 from model.supernet_transformer import TransformerSuper
 from run_pipeline import build_tokenizer, count_subnet_params, count_subnet_flops, CHOICES
 from agents.experiment_agent import _finetune_one_arch
@@ -52,7 +53,8 @@ def parse_args():
     # Target
     p.add_argument("--hospital", type=str, required=True)
     p.add_argument("--task", type=str, required=True,
-                   choices=["death", "stay", "readmission"])
+                   choices=ALL_TASKS,
+                   help="Binary or multilabel task. Multilabel: next_diag_*_pheno.")
     p.add_argument("--k", type=int, required=True,
                    help="Number of random architectures to evaluate under both schemes")
 
@@ -373,7 +375,8 @@ def main():
         full_data = pickle.load(f)
     with open(data_root / "mimic_pretrain.pkl", "rb") as f:
         pretrain_data = pickle.load(f)
-    with open(data_root / "mimic_downstream.pkl", "rb") as f:
+    # Per-task split path (binary tasks share mimic_downstream.pkl)
+    with open(data_root / task_info(args.task)["data_pkl"], "rb") as f:
         train_data, val_data, _test_data = pickle.load(f)
 
     tokenizer = build_tokenizer(full_data, ["[PAD]", "[CLS]", "[MASK]"])
@@ -444,7 +447,9 @@ def main():
         autoformer_rows.append({
             "arch_idx": i,
             **scfg,
-            "num_params": count_subnet_params(icfg, vocab_size, max_adm=max_adm),
+            "num_params": count_subnet_params(icfg, vocab_size,
+                                               num_classes=task_info(args.task)["num_classes"],
+                                               max_adm=max_adm),
             "flops": count_subnet_flops(icfg, args.flops_seq_len),
             "autoformer_accuracy": avg_val["accuracy"],
             "autoformer_f1": avg_val["f1"],

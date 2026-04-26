@@ -65,6 +65,7 @@ from utils.dataset import FineTuneEHRDataset, batcher  # noqa: E402
 from utils.engine import evaluate  # noqa: E402
 from utils.seed import set_random_seed  # noqa: E402
 from utils.device_helpers import dataloader_kwargs  # noqa: E402
+from utils.task_registry import task_info, ALL_TASKS  # noqa: E402
 from model.supernet_transformer import TransformerSuper  # noqa: E402
 
 
@@ -86,13 +87,13 @@ def _random_cand():
     }
 
 
-def _validate(cand, vocab_size, max_adm, max_params,
+def _validate(cand, vocab_size, max_adm, max_params, num_classes,
               max_flops=None, flops_seq_len=512):
     """Constraint + param budget + FLOPs budget. Returns (ok, n_params, n_flops)."""
     if cand["embed_dim"] % cand["num_heads"] != 0:
         return False, 0, 0
     internal = _to_internal_config(cand)
-    n_params = count_subnet_params(internal, vocab_size, max_adm=max_adm)
+    n_params = count_subnet_params(internal, vocab_size, num_classes=num_classes, max_adm=max_adm)
     if n_params > max_params:
         return False, n_params, 0
     n_flops = count_subnet_flops(internal, flops_seq_len)
@@ -101,7 +102,7 @@ def _validate(cand, vocab_size, max_adm, max_params,
     return True, n_params, n_flops
 
 
-def _sample_unique_valid(visited, vocab_size, max_adm, max_params,
+def _sample_unique_valid(visited, vocab_size, max_adm, max_params, num_classes,
                          max_flops=None, flops_seq_len=512, max_attempts=200):
     """
     Sample uniformly until we hit a valid, in-budget, unvisited config.
@@ -114,7 +115,7 @@ def _sample_unique_valid(visited, vocab_size, max_adm, max_params,
         if key in visited:
             continue
         ok, n_params, n_flops = _validate(
-            cand, vocab_size, max_adm, max_params,
+            cand, vocab_size, max_adm, max_params, num_classes,
             max_flops=max_flops, flops_seq_len=flops_seq_len,
         )
         if ok:
@@ -132,7 +133,8 @@ def parse_args():
     # Target
     p.add_argument("--hospital", type=str, required=True)
     p.add_argument("--task", type=str, required=True,
-                   choices=["death", "stay", "readmission"])
+                   choices=ALL_TASKS,
+                   help="Binary or multilabel task. Multilabel: next_diag_*_pheno.")
     # Constraints
     p.add_argument("--max_params", type=int, required=True)
     p.add_argument("--max_flops", type=int, default=None,
@@ -215,7 +217,7 @@ def main():
     print(f"Loaded checkpoint: {ckpt_path}")
 
     # --- Finetune loaders ---
-    train_data, val_data, test_data = pickle.load(open(data_root / "mimic_downstream.pkl", "rb"))
+    train_data, val_data, test_data = pickle.load(open(data_root / task_info(args.task)["data_pkl"], "rb"))
     token_type = ["diag", "med", "lab", "pro"]
     train_dataset = FineTuneEHRDataset(train_data, tokenizer, token_type, max_adm, args.task)
     val_dataset = FineTuneEHRDataset(val_data, tokenizer, token_type, max_adm, args.task)
@@ -253,6 +255,7 @@ def main():
 
         cand, internal, n_params, n_flops = _sample_unique_valid(
             visited, vocab_size, max_adm, args.max_params,
+            task_info(args.task)["num_classes"],
             max_flops=args.max_flops, flops_seq_len=args.flops_seq_len,
         )
 
@@ -351,8 +354,9 @@ def main():
           f"num_heads={best_row_info['num_heads']}, "
           f"params={best_row_info['num_params']:,}")
 
+    info = task_info(args.task)
     model = TransformerSuper(
-        num_classes=2,
+        num_classes=info["num_classes"],
         vocab_size=ckpt["vocab_size"],
         embed_dim=ckpt["embed_dim"],
         mlp_ratio=ckpt["mlp_ratio"],
@@ -367,7 +371,8 @@ def main():
     ).to(device)
     model.load_state_dict(best_model_sd)
 
-    test_metrics = evaluate(test_loader, model, device, retrain_config=best_config)
+    test_metrics = evaluate(test_loader, model, device, retrain_config=best_config,
+                            task_type=info["type"])
     print(f"\n  Test Results:")
     print(f"    Accuracy = {test_metrics['accuracy']:.4f}")
     print(f"    F1       = {test_metrics['f1']:.4f}")

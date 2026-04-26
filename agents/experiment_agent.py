@@ -23,6 +23,7 @@ from run_pipeline import count_subnet_params, count_subnet_flops
 from model.supernet_transformer import TransformerSuper
 from utils.tracer import get_tracer
 from utils.device_helpers import snapshot_sd_cpu
+from utils.task_registry import task_info
 
 
 def _to_internal_config(proposal):
@@ -40,6 +41,11 @@ def _finetune_one_arch(config, ckpt, train_loader, val_loader, device, args):
     """
     Finetune a single architecture with early stopping + top-k averaging on val only.
 
+    Routes between binary and multilabel based on task_info(args.task)["type"]:
+      - num_classes set from registry (2 for binary, 18 for multilabel phenotypes)
+      - criterion: CrossEntropy for binary, BCEWithLogits for multilabel
+      - eval metrics: macro-averaged across classes for multilabel
+
     Returns:
         (avg_val, best_model_sd) — averaged val metrics and the model state dict
         from the best val epoch (for potential later test evaluation).
@@ -47,8 +53,12 @@ def _finetune_one_arch(config, ckpt, train_loader, val_loader, device, args):
     vocab_size = ckpt["vocab_size"]
     max_adm = ckpt["max_adm_num"]
 
+    info = task_info(args.task)
+    task_type = info["type"]
+    num_classes = info["num_classes"]
+
     model = TransformerSuper(
-        num_classes=2,
+        num_classes=num_classes,
         vocab_size=vocab_size,
         embed_dim=ckpt["embed_dim"],
         mlp_ratio=ckpt["mlp_ratio"],
@@ -62,7 +72,7 @@ def _finetune_one_arch(config, ckpt, train_loader, val_loader, device, args):
         max_adm_num=max_adm,
     ).to(device)
 
-    # Load pretrained encoder weights (skip cls head)
+    # Load pretrained encoder weights (skip cls head — its shape differs per task)
     pretrained_sd = ckpt["model_state_dict"]
     model_sd = model.state_dict()
     filtered = {k: v for k, v in pretrained_sd.items()
@@ -71,7 +81,7 @@ def _finetune_one_arch(config, ckpt, train_loader, val_loader, device, args):
     model.load_state_dict(model_sd)
 
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.BCEWithLogitsLoss() if task_type == "multilabel" else torch.nn.CrossEntropyLoss()
 
     epoch_records = []  # (val_auprc, val_metrics)
     best_val_auprc = -1.0
@@ -83,9 +93,11 @@ def _finetune_one_arch(config, ckpt, train_loader, val_loader, device, args):
             model=model, criterion=criterion, data_loader=train_loader,
             optimizer=optimizer, device=device, epoch=epoch,
             mode="retrain", retrain_config=config, task="cls",
+            task_type=task_type,
             max_grad_norm=args.max_grad_norm,
         )
-        val_metrics = evaluate(val_loader, model, device, retrain_config=config)
+        val_metrics = evaluate(val_loader, model, device, retrain_config=config,
+                               task_type=task_type)
 
         val_auprc = val_metrics["auprc"]
         epoch_records.append((val_auprc, val_metrics))
@@ -141,7 +153,8 @@ def run_trials(reviewed_proposals, search_state, ckpt, train_loader, val_loader,
         config = _to_internal_config(proposal)
 
         # Validate param count + compute FLOPs
-        n_params = count_subnet_params(config, vocab_size, max_adm=max_adm)
+        num_classes = task_info(args.task)["num_classes"]
+        n_params = count_subnet_params(config, vocab_size, num_classes=num_classes, max_adm=max_adm)
         flops_seq_len = getattr(args, "flops_seq_len", 512)
         n_flops = count_subnet_flops(config, flops_seq_len)
         print(f"\n    Experiment {i+1}/{len(proposals_to_run)}: "

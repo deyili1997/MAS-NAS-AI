@@ -65,6 +65,7 @@ from utils.dataset import FineTuneEHRDataset, batcher  # noqa: E402
 from utils.engine import evaluate  # noqa: E402
 from utils.seed import set_random_seed  # noqa: E402
 from utils.device_helpers import dataloader_kwargs  # noqa: E402
+from utils.task_registry import task_info, ALL_TASKS  # noqa: E402
 from model.supernet_transformer import TransformerSuper  # noqa: E402
 
 
@@ -83,9 +84,14 @@ def _build_prompt(search_state, max_params, hospital, task, max_flops=None):
     )
 
     # Target task
+    info = task_info(task)
+    if info["type"] == "multilabel":
+        task_descr = f"multilabel ({info['num_classes']}-class phenotype prediction)"
+    else:
+        task_descr = "binary classification"
     parts.append(f"\n## Target\n")
     parts.append(f"Hospital: {hospital}\n")
-    parts.append(f"Task: {task} (binary classification)\n")
+    parts.append(f"Task: {task} ({task_descr})\n")
 
     # Search space
     parts.append("\n## Search Space\n")
@@ -225,6 +231,7 @@ def _propose_one(search_state, max_params, client, model, hospital, task,
     max_attempts with extra feedback on invalid / duplicate / over-budget.
     """
     base_prompt = _build_prompt(search_state, max_params, hospital, task, max_flops=max_flops)
+    num_classes = task_info(task)["num_classes"]
     extra_feedback = ""
 
     for attempt in range(max_attempts):
@@ -264,7 +271,7 @@ def _propose_one(search_state, max_params, client, model, hospital, task,
             continue
 
         internal = _to_internal_config(prop)
-        n_params = count_subnet_params(internal, vocab_size, max_adm=max_adm)
+        n_params = count_subnet_params(internal, vocab_size, num_classes=num_classes, max_adm=max_adm)
         if n_params > max_params:
             print(f"  OVER BUDGET (params): {n_params:,} > {max_params:,}")
             extra_feedback = (
@@ -308,7 +315,8 @@ def parse_args():
     # Target
     p.add_argument("--hospital", type=str, required=True)
     p.add_argument("--task", type=str, required=True,
-                   choices=["death", "stay", "readmission"])
+                   choices=ALL_TASKS,
+                   help="Binary or multilabel task. Multilabel: next_diag_*_pheno.")
 
     # Constraints
     p.add_argument("--max_params", type=int, required=True)
@@ -381,7 +389,7 @@ def main():
     data_root = Path(f"./data_process/{args.hospital}/{args.hospital}-processed")
     full_data_path = data_root / "mimic.pkl"
     pretrain_data_path = data_root / "mimic_pretrain.pkl"
-    finetune_data_path = data_root / "mimic_downstream.pkl"
+    finetune_data_path = data_root / task_info(args.task)["data_pkl"]
 
     special_tokens = ["[PAD]", "[CLS]", "[MASK]"]
     full_data = pickle.load(open(full_data_path, "rb"))
@@ -543,8 +551,9 @@ def main():
           f"num_heads={best_row_info['num_heads']}, "
           f"params={best_row_info['num_params']:,}")
 
+    info = task_info(args.task)
     model = TransformerSuper(
-        num_classes=2,
+        num_classes=info["num_classes"],
         vocab_size=ckpt["vocab_size"],
         embed_dim=ckpt["embed_dim"],
         mlp_ratio=ckpt["mlp_ratio"],
@@ -559,7 +568,8 @@ def main():
     ).to(device)
     model.load_state_dict(best_model_sd)
 
-    test_metrics = evaluate(test_loader, model, device, retrain_config=best_config)
+    test_metrics = evaluate(test_loader, model, device, retrain_config=best_config,
+                            task_type=info["type"])
     print(f"\n  Test Results:")
     print(f"    Accuracy = {test_metrics['accuracy']:.4f}")
     print(f"    F1       = {test_metrics['f1']:.4f}")

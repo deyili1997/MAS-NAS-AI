@@ -84,6 +84,7 @@ from utils.dataset import FineTuneEHRDataset, batcher  # noqa: E402
 from utils.engine import evaluate  # noqa: E402
 from utils.seed import set_random_seed  # noqa: E402
 from utils.device_helpers import dataloader_kwargs  # noqa: E402
+from utils.task_registry import task_info, ALL_TASKS  # noqa: E402
 from model.supernet_transformer import TransformerSuper  # noqa: E402
 
 
@@ -206,9 +207,14 @@ def _format_budget(max_params, max_flops):
 
 
 def _build_init_prompt(hospital, task, max_params, max_flops):
+    info = task_info(task)
+    if info["type"] == "multilabel":
+        task_descr = f"multilabel ({info['num_classes']}-class phenotype prediction)"
+    else:
+        task_descr = "binary classification"
     return (
         f"You are designing a Transformer for EHR data on hospital={hospital}, "
-        f"task={task} (binary classification).\n\n"
+        f"task={task} ({task_descr}).\n\n"
         f"{_format_search_space()}{_format_budget(max_params, max_flops)}\n"
         "Propose ONE architecture as JSON of exactly this shape:\n"
         '{"embed_dim": <int>, "depth": <int>, "mlp_ratio": <int>, "num_heads": <int>}\n'
@@ -328,7 +334,8 @@ def _call_llm(prompt, client, model, temperature=0.7, max_retries=5):
 
 
 def _generate_one(prompt, client, model, temperature, vocab_size, max_adm,
-                  max_params, max_flops, flops_seq_len, visited, max_attempts=5):
+                  max_params, max_flops, flops_seq_len, visited, num_classes,
+                  max_attempts=5):
     """Get one valid, in-budget, unvisited config from the LLM."""
     feedback = ""
     for attempt in range(max_attempts):
@@ -361,7 +368,7 @@ def _generate_one(prompt, client, model, temperature, vocab_size, max_adm,
             )
             continue
         internal = _to_internal_config(prop)
-        n_params = count_subnet_params(internal, vocab_size, max_adm=max_adm)
+        n_params = count_subnet_params(internal, vocab_size, num_classes=num_classes, max_adm=max_adm)
         if n_params > max_params:
             print(f"  OVER PARAMS: {n_params:,} > {max_params:,}")
             feedback = (
@@ -394,7 +401,8 @@ def parse_args():
     # Target
     p.add_argument("--hospital", type=str, required=True)
     p.add_argument("--task", type=str, required=True,
-                   choices=["death", "stay", "readmission"])
+                   choices=ALL_TASKS,
+                   help="Binary or multilabel task. Multilabel: next_diag_*_pheno.")
     # Constraints
     p.add_argument("--max_params", type=int, required=True)
     p.add_argument("--max_flops", type=int, default=None)
@@ -491,7 +499,7 @@ def main():
     print(f"Loaded checkpoint: {ckpt_path}")
 
     # --- Finetune loaders ---
-    train_data, val_data, test_data = pickle.load(open(data_root / "mimic_downstream.pkl", "rb"))
+    train_data, val_data, test_data = pickle.load(open(data_root / task_info(args.task)["data_pkl"], "rb"))
     token_type = ["diag", "med", "lab", "pro"]
     train_ds = FineTuneEHRDataset(train_data, tokenizer, token_type, max_adm, args.task)
     val_ds = FineTuneEHRDataset(val_data, tokenizer, token_type, max_adm, args.task)
@@ -573,6 +581,7 @@ def main():
                 base_prompt, client, args.model, chosen_temp,
                 vocab_size, max_adm, args.max_params, args.max_flops,
                 args.flops_seq_len, visited,
+                num_classes=task_info(args.task)["num_classes"],
             )
 
         else:
@@ -615,6 +624,7 @@ def main():
                     base_prompt, client, args.model, chosen_temp,
                     vocab_size, max_adm, args.max_params, args.max_flops,
                     args.flops_seq_len, visited,
+                    num_classes=task_info(args.task)["num_classes"],
                 )
 
             else:
@@ -635,6 +645,7 @@ def main():
                     base_prompt, client, args.model, chosen_temp,
                     vocab_size, max_adm, args.max_params, args.max_flops,
                     args.flops_seq_len, visited,
+                    num_classes=task_info(args.task)["num_classes"],
                 )
 
         if prop is None:
@@ -768,8 +779,9 @@ def main():
           f"mlp_ratio={best_info['mlp_ratio']}, num_heads={best_info['num_heads']}, "
           f"params={best_info['num_params']:,}")
 
+    info = task_info(args.task)
     model = TransformerSuper(
-        num_classes=2,
+        num_classes=info["num_classes"],
         vocab_size=ckpt["vocab_size"],
         embed_dim=ckpt["embed_dim"], mlp_ratio=ckpt["mlp_ratio"],
         depth=ckpt["depth"], num_heads=ckpt["num_heads"],
@@ -780,7 +792,8 @@ def main():
         pre_norm=True, max_adm_num=ckpt["max_adm_num"],
     ).to(device)
     model.load_state_dict(best_sd)
-    test_metrics = evaluate(test_loader, model, device, retrain_config=best_internal)
+    test_metrics = evaluate(test_loader, model, device, retrain_config=best_internal,
+                            task_type=info["type"])
 
     print(f"\n  Test Results:")
     print(f"    Accuracy = {test_metrics['accuracy']:.4f}")

@@ -168,9 +168,13 @@ def _validate_config(config):
 
 def critique(context, search_state, proposals, max_params, client,
              vocab_size=None, max_adm=8, model="claude-sonnet-4-6", strategy=None,
-             max_flops=None, flops_seq_len=512):
+             max_flops=None, flops_seq_len=512, num_classes=2):
     """
     Use Claude to critique architecture proposals.
+
+    Args:
+        num_classes: head output dimensionality used for parameter counting
+                     (2 for binary tasks, 18 for multilabel phenotypes).
 
     Returns:
         (accepted, rejected_with_critiques)
@@ -276,7 +280,8 @@ def critique(context, search_state, proposals, max_params, client,
                 "mlp_ratio": [config["mlp_ratio"]] * config["depth"],
                 "num_heads": [config["num_heads"]] * config["depth"],
             }
-            n_params = count_subnet_params(internal_config, vocab_size, max_adm=max_adm)
+            n_params = count_subnet_params(internal_config, vocab_size,
+                                            num_classes=num_classes, max_adm=max_adm)
             if n_params > max_params:
                 print(f"  Proposal {idx} [REJECTED] because {n_params:,} > {max_params:,} (but [ACCEPTED] by LLM)")
                 rejected_with_critiques.append({
