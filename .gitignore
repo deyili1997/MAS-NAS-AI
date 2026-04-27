@@ -1,7 +1,6 @@
 .env
 __pycache__/
 *.pyc
-results/
 .DS_Store
 
 # Data files: ignore raw/processed contents (huge + PHI), keep folder
@@ -11,3 +10,9 @@ data_process/*/*-raw/*
 !data_process/*/*-raw/.gitkeep
 data_process/*/*-processed/*
 !data_process/*/*-processed/.gitkeep
+
+# Results: track all CSVs / JSONs / PNGs / agent_io_logs (small, useful for
+# analysis), but ignore model checkpoints (.pt files in checkpoint_mlm/) since
+# they're large + regenerable by re-pretraining.
+results/*/checkpoint_mlm/*
+!results/*/checkpoint_mlm/.gitkeep
