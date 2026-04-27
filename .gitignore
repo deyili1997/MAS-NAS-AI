@@ -1,6 +1,13 @@
 .env
 __pycache__/
 *.pyc
-data_process/*/
 results/
 .DS_Store
+
+# Data files: ignore raw/processed contents (huge + PHI), keep folder
+# structure via .gitkeep so the layout is reproducible.
+# Pattern is hospital-agnostic: any *-raw/ or *-processed/ under any hospital.
+data_process/*/*-raw/*
+!data_process/*/*-raw/.gitkeep
+data_process/*/*-processed/*
+!data_process/*/*-processed/.gitkeep
