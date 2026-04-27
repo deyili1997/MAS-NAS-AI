@@ -8,11 +8,7 @@ AutoFormer-style NAS Pipeline for Longitudinal EHR Data
 """
 
 import argparse
-import copy
-import json
-import os
 import pickle
-import sys
 
 import numpy as np
 import pandas as pd
@@ -378,6 +374,44 @@ def _load_task_split(args, task):
     return pickle.load(open(pkl_path, "rb"))
 
 
+def _sample_unique_configs(choices, n_archs, max_attempts_factor=50):
+    """Rejection-sample unique scalar configs until reaching n_archs (or
+    exhausting the search space).
+
+    Why: pretrain repeats the same sub-config many times by design (each step
+    is a fresh sample for gradient estimation). But for the FINETUNE phase we
+    want N DISTINCT architectures so we don't waste finetune budget evaluating
+    the same arch twice. With 4×4×4×4 = 256 valid configs and N=10, naive list
+    comprehension hits a duplicate ~17% of the time.
+
+    Returns a list of internal-format configs (per-layer lists) — same shape
+    as `sample_configs(choices)` returns directly.
+    """
+    total_space = (len(choices["embed_dim"]) * len(choices["depth"])
+                   * len(choices["mlp_ratio"]) * len(choices["num_heads"]))
+    target = min(n_archs, total_space)
+    if target < n_archs:
+        print(f"[WARN] num_archs={n_archs} exceeds search space size "
+              f"{total_space}; capping at {total_space}.")
+
+    seen = set()
+    out = []
+    max_attempts = max(target * max_attempts_factor, 1)
+    attempts = 0
+    while len(out) < target and attempts < max_attempts:
+        cfg = sample_configs(choices)
+        key = (cfg["embed_dim"][0], cfg["layer_num"],
+               cfg["mlp_ratio"][0], cfg["num_heads"][0])
+        if key not in seen:
+            seen.add(key)
+            out.append(cfg)
+        attempts += 1
+    if len(out) < target:
+        print(f"[WARN] only got {len(out)}/{target} unique configs after "
+              f"{max_attempts} attempts; search space may be near-exhausted.")
+    return out
+
+
 def finetune_and_evaluate(args, tokenizer, ckpt_path, device):
     """Phase 2 — for each task in args.tasks: load that task's pkl, sample N
     architectures, finetune each, record metrics. Multilabel tasks build the
@@ -391,9 +425,10 @@ def finetune_and_evaluate(args, tokenizer, ckpt_path, device):
     max_adm = ckpt["max_adm_num"]
     token_type = ["diag", "med", "lab", "pro"]
 
-    # Sample random architectures once (shared across tasks)
+    # Sample random architectures once (shared across tasks). Dedup ensures
+    # each finetune is a distinct arch (pretrain still repeats by design).
     set_random_seed(args.seed)
-    sampled_configs = [sample_configs(CHOICES) for _ in range(args.num_archs)]
+    sampled_configs = _sample_unique_configs(CHOICES, args.num_archs)
 
     all_results = []
 

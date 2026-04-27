@@ -136,6 +136,36 @@ def _make_pretrain_loaders(pretrain_data, tokenizer, max_adm, batch_size, seed, 
     return train_loader, val_loader
 
 
+def _sample_unique_configs(choices, n_archs, max_attempts_factor=50):
+    """Rejection-sample unique scalar configs (dedup wrapper around
+    `sample_configs`). Mirrors the helper in run_pipeline.py — each finetune
+    in the regression study should evaluate a DISTINCT arch, otherwise k
+    duplicates pollute both AutoFormer and Traditional sides."""
+    total_space = (len(choices["embed_dim"]) * len(choices["depth"])
+                   * len(choices["mlp_ratio"]) * len(choices["num_heads"]))
+    target = min(n_archs, total_space)
+    if target < n_archs:
+        print(f"[WARN] k={n_archs} exceeds search space size "
+              f"{total_space}; capping at {total_space}.")
+
+    seen = set()
+    out = []
+    max_attempts = max(target * max_attempts_factor, 1)
+    attempts = 0
+    while len(out) < target and attempts < max_attempts:
+        cfg = sample_configs(choices)
+        key = (cfg["embed_dim"][0], cfg["layer_num"],
+               cfg["mlp_ratio"][0], cfg["num_heads"][0])
+        if key not in seen:
+            seen.add(key)
+            out.append(cfg)
+        attempts += 1
+    if len(out) < target:
+        print(f"[WARN] only got {len(out)}/{target} unique configs after "
+              f"{max_attempts} attempts; search space may be near-exhausted.")
+    return out
+
+
 # ---------------------------------------------------------------------------
 # AutoFormer-style supernet pretrain
 # ---------------------------------------------------------------------------
@@ -426,7 +456,7 @@ def main():
 
     # --- Sample K architectures (deterministic under seed) ---
     set_random_seed(args.seed)
-    arch_configs = [sample_configs(CHOICES) for _ in range(args.k)]
+    arch_configs = _sample_unique_configs(CHOICES, args.k)
     scalar_configs = [_to_scalar(c) for c in arch_configs]
 
     print(f"\nSampled {args.k} architectures:")
