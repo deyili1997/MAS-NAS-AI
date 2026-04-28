@@ -214,7 +214,9 @@ def main():
         pretrain_data = pickle.load(open(data_root / "mimic_pretrain.pkl", "rb"))
         args.output_dir = args.results_dir
         ckpt_path = pretrain(args, tokenizer, pretrain_data, max_adm, device)
-    ckpt = torch.load(ckpt_path, map_location="cpu")
+    # weights_only=True: see run_pipeline.py:~314 for ckpt schema (all metadata
+    # cast to python types so the safe loader accepts them).
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True)
     print(f"Loaded checkpoint: {ckpt_path}")
 
     # --- Finetune loaders ---

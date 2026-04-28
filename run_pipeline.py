@@ -311,15 +311,23 @@ def pretrain(args, tokenizer, pretrain_data, max_adm, device):
     # controls small outputs (metadata.csv, etc.).
     save_dir = get_checkpoint_dir(args.hospital)
     ckpt_path = save_dir / "mlm_model.pt"
+    # Cast every metadata field to a pure-Python type so the resulting
+    # ckpt only contains PyTorch-allowlisted globals (Tensor, OrderedDict,
+    # dict, list, int, float, str). This is what makes torch.load(...,
+    # weights_only=True) — the new PyTorch 2.6+ default — succeed on this
+    # ckpt without `add_safe_globals()` workarounds. `vocab_size` and
+    # `max_adm` come from pandas/numpy so they're commonly np.int64;
+    # argparse fields are already python types but we wrap them too as a
+    # zero-cost safety net against any future shape change.
     torch.save({
         "model_state_dict": model.state_dict(),
         "choices": CHOICES,
-        "embed_dim": args.embed_dim,
-        "depth": args.depth,
-        "num_heads": args.num_heads,
-        "mlp_ratio": args.mlp_ratio,
-        "vocab_size": vocab_size,
-        "max_adm_num": max_adm,
+        "embed_dim": int(args.embed_dim),
+        "depth": int(args.depth),
+        "num_heads": int(args.num_heads),
+        "mlp_ratio": float(args.mlp_ratio),
+        "vocab_size": int(vocab_size),
+        "max_adm_num": int(max_adm),
     }, ckpt_path)
     print(f"Saved pretrain checkpoint: {ckpt_path}")
     return ckpt_path
@@ -422,7 +430,13 @@ def finetune_and_evaluate(args, tokenizer, ckpt_path, device):
     print(f"Phase 2: Finetune & Evaluate — {args.hospital}")
     print("=" * 60)
 
-    ckpt = torch.load(ckpt_path, map_location="cpu")
+    # weights_only=True is the PyTorch 2.6+ secure default: only allowlisted
+    # globals (tensors, OrderedDict, dict, list, int, float, str, etc.) are
+    # accepted in the pickle. Our save block (line ~314) casts every metadata
+    # field to a python type explicitly, so this constraint is satisfied.
+    # We pass it explicitly to make intent clear and to be immune against
+    # any future PyTorch default flip.
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=True)
     vocab_size = ckpt["vocab_size"]
     max_adm = ckpt["max_adm_num"]
     token_type = ["diag", "med", "lab", "pro"]
