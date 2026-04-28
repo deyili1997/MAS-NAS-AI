@@ -20,6 +20,8 @@ Usage:
 """
 
 import argparse
+import hashlib
+import json
 import pickle
 from pathlib import Path
 
@@ -38,7 +40,7 @@ from utils.dataset import PreTrainEHRDataset, FineTuneEHRDataset, batcher
 from utils.engine import sample_configs, train_one_epoch, evaluate_mlm
 from utils.device_helpers import dataloader_kwargs, snapshot_sd_cpu, pick_device, empty_cache
 from utils.task_registry import task_info, ALL_TASKS
-from utils.paths import get_processed_root
+from utils.paths import get_processed_root, get_checkpoint_dir
 from model.supernet_transformer import TransformerSuper
 from run_pipeline import build_tokenizer, count_subnet_params, count_subnet_flops, CHOICES
 from agents.experiment_agent import _finetune_one_arch
@@ -170,9 +172,60 @@ def _sample_unique_configs(choices, n_archs, max_attempts_factor=50):
 # ---------------------------------------------------------------------------
 # AutoFormer-style supernet pretrain
 # ---------------------------------------------------------------------------
+def _supernet_cache_path(args) -> Path:
+    """Compute a hash-based cache filename for the supernet pretrain ckpt.
+
+    The hash includes every hyperparameter that affects the trained weights,
+    so any config change auto-invalidates the cache (you'll get a fresh
+    train). To force a fresh train despite an unchanged config, just `rm`
+    the cache file printed at runtime.
+
+    Saved under the same /blue/.../checkpoint_mlm/ dir routed by
+    get_checkpoint_dir(), but with a `regression_supernet_<hash>.pt`
+    filename so it never collides with `mlm_model.pt` (the run_pipeline
+    checkpoint).
+    """
+    key_fields = {
+        # Supernet max dims (defining what was trained)
+        "embed_dim": int(args.embed_dim),
+        "depth": int(args.depth),
+        "num_heads": int(args.num_heads),
+        "mlp_ratio": float(args.mlp_ratio),
+        # Optimization (defining how we got there)
+        "lr": float(args.lr),
+        "weight_decay": float(args.weight_decay),
+        "batch_size": int(args.batch_size),
+        "pretrain_epochs": int(args.pretrain_epochs),
+        "pretrain_patience": int(args.pretrain_patience),
+        "max_grad_norm": float(args.max_grad_norm),
+        # Regularization
+        "drop_rate": float(args.drop_rate),
+        "attn_drop_rate": float(args.attn_drop_rate),
+        "drop_path_rate": float(args.drop_path_rate),
+        # Reproducibility
+        "seed": int(args.seed),
+    }
+    digest = hashlib.sha1(
+        json.dumps(key_fields, sort_keys=True).encode()
+    ).hexdigest()[:10]
+    return get_checkpoint_dir(args.hospital) / f"regression_supernet_{digest}.pt"
+
+
 def pretrain_supernet(args, vocab_size, max_adm, train_loader, val_loader, device):
     """Build TransformerSuper at max dims, train MLM with mode='super'
-    (random config sampling each step). Returns in-memory ckpt dict."""
+    (random config sampling each step). Returns in-memory ckpt dict.
+
+    Cached: if a ckpt with matching hyperparams already exists at
+    `_supernet_cache_path(args)`, it is loaded and returned instead of
+    re-training. Subsequent runs with same config skip Phase A entirely.
+    """
+    # ---- Cache check (skip pretrain if same-config ckpt exists on disk) ----
+    cache_path = _supernet_cache_path(args)
+    if cache_path.exists():
+        print(f"[SupernetPretrain] ✓ Cache HIT — reusing: {cache_path}")
+        return torch.load(cache_path, map_location="cpu", weights_only=True)
+    print(f"[SupernetPretrain] Cache MISS. Training fresh; will save to: {cache_path}")
+
     model = TransformerSuper(
         num_classes=0,
         vocab_size=vocab_size,
@@ -254,15 +307,22 @@ def pretrain_supernet(args, vocab_size, max_adm, train_loader, val_loader, devic
         model.load_state_dict(best_sd)
     print(f"[SupernetPretrain] best val_loss={best_val_loss:.4f}")
 
+    # All metadata cast to pure-Python types so the resulting ckpt is
+    # `weights_only=True` loadable (PyTorch 2.6+ default).
     ckpt = {
         "model_state_dict": snapshot_sd_cpu(model.state_dict()),
-        "vocab_size": vocab_size,
-        "embed_dim": args.embed_dim,
-        "depth": args.depth,
-        "num_heads": args.num_heads,
-        "mlp_ratio": args.mlp_ratio,
-        "max_adm_num": max_adm,
+        "vocab_size": int(vocab_size),
+        "embed_dim": int(args.embed_dim),
+        "depth": int(args.depth),
+        "num_heads": int(args.num_heads),
+        "mlp_ratio": float(args.mlp_ratio),
+        "max_adm_num": int(max_adm),
     }
+
+    # Persist for future re-runs (one-time ~150 MB write)
+    torch.save(ckpt, cache_path)
+    print(f"[SupernetPretrain] ✓ Cached for future runs: {cache_path}")
+
     del model, optimizer
     empty_cache()
     return ckpt
