@@ -31,7 +31,7 @@ Usage:
         --hospital MIMIC-IV --task death \\
         --max_params 1000000 --budget 20 \\
         --candidates_per_iter 3 \\
-        --ckpt_path results/MIMIC-IV/checkpoint_mlm/mlm_model.pt
+        --ckpt_path /blue/mei.liu/lideyi/MAS-NAS/results/MIMIC-IV/checkpoint_mlm/mlm_model.pt
 """
 
 import argparse

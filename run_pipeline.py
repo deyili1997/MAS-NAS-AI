@@ -23,7 +23,7 @@ from utils.dataset import PreTrainEHRDataset, FineTuneEHRDataset, batcher
 from utils.engine import sample_configs, train_one_epoch, evaluate, evaluate_mlm
 from utils.device_helpers import dataloader_kwargs, snapshot_sd_cpu, pick_device, empty_cache
 from utils.task_registry import task_info, ALL_TASKS, is_multilabel
-from utils.paths import get_processed_root
+from utils.paths import get_processed_root, get_checkpoint_dir
 from model.supernet_transformer import TransformerSuper
 
 
@@ -306,9 +306,10 @@ def pretrain(args, tokenizer, pretrain_data, max_adm, device):
         model.load_state_dict(best_model_sd)
     print(f"Best pretrain val_loss: {best_val_loss:.4f}")
 
-    # save checkpoint
-    save_dir = Path(args.output_dir) / args.hospital / "checkpoint_mlm"
-    save_dir.mkdir(parents=True, exist_ok=True)
+    # save checkpoint — big file (~100-300 MB), routed to /blue on HPC,
+    # repo-local results/ on Mac. Decoupled from --output_dir which still
+    # controls small outputs (metadata.csv, etc.).
+    save_dir = get_checkpoint_dir(args.hospital)
     ckpt_path = save_dir / "mlm_model.pt"
     torch.save({
         "model_state_dict": model.state_dict(),

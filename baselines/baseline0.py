@@ -29,7 +29,7 @@ Usage:
     python baselines/baseline0.py \\
         --hospital MIMIC-IV --task death \\
         --max_params 1000000 --budget 10 \\
-        --ckpt_path results/MIMIC-IV/checkpoint_mlm/mlm_model.pt
+        --ckpt_path /blue/mei.liu/lideyi/MAS-NAS/results/MIMIC-IV/checkpoint_mlm/mlm_model.pt
 
     # Or pretrain automatically
     python baselines/baseline0.py \\

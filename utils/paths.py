@@ -2,19 +2,23 @@
 (local Mac vs HiPerGator server).
 
 Use case: on HiPerGator, the repo lives in /home/lideyi/MAS-NAS (10 GB
-home-quota limit) while processed data sits in /blue/mei.liu/lideyi/MAS-NAS/...
-(TB-scale group quota). Repo root != data root, so the old relative-path
-convention `Path(f"./data_process/{H}/{H}-processed")` resolves to the
-wrong location on HPC.
+home-quota limit) while bulky artifacts (processed data pkls, model
+checkpoints) sit in /blue/mei.liu/lideyi/MAS-NAS/... (TB-scale group
+quota). Repo root != big-output root, so the naive relative-path
+convention resolves to the wrong location on HPC.
 
-Resolution order for processed root:
-    1. $MIMIC_PROCESSED_DIR (if set, only honored when hospital == "MIMIC-IV")
-    2. /blue/mei.liu/lideyi/MAS-NAS/data_process/<H>/<H>-processed (HiPerGator)
-    3. <project_root>/data_process/<H>/<H>-processed (local Mac fallback)
+Resolution policy (per-function): if `_is_hpc()` returns True (i.e. the
+HPC project root /blue/mei.liu/lideyi/MAS-NAS/ is reachable), large
+artifacts route there; otherwise they fall back to the local repo tree.
+Per-function env var overrides are honored when set.
 
-Detection: a candidate is "live" iff its parent dir exists. The leaf is
-auto-mkdir'd when missing (so the data-prep notebook can write into it
-on first run).
+Functions:
+    get_processed_root(hospital): processed pkl dir for a hospital.
+    get_checkpoint_dir(hospital):  pretrain .pt checkpoint dir.
+
+Small outputs (CSVs / JSONs / PNGs / agent_io_log.txt) are NOT routed
+through this module — they stay in the repo at results/<hospital>/...
+where git can track them.
 """
 from __future__ import annotations
 import os
@@ -23,44 +27,60 @@ from pathlib import Path
 # This file lives at <project_root>/utils/paths.py — go up two levels.
 _PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent
 
+# HiPerGator project root (only exists when running on UF HPC; the
+# directory's existence is our portable "am I on HPC?" probe).
+_HPC_PROJECT_ROOT: Path = Path("/blue/mei.liu/lideyi/MAS-NAS")
+
+
+def _is_hpc() -> bool:
+    """True iff we're running on HiPerGator with the Mei Liu lab
+    project space mounted. Used as the routing predicate for big
+    outputs (processed data, checkpoints)."""
+    return _HPC_PROJECT_ROOT.exists()
+
 
 def get_processed_root(hospital: str) -> Path:
     """Resolve the absolute path of <hospital>-processed/ across local/HPC.
 
-    Args:
-        hospital: e.g. "MIMIC-IV". Used to construct directory names and
-                  pick hospital-specific HPC overrides.
+    On HPC: /blue/mei.liu/lideyi/MAS-NAS/data_process/<H>/<H>-processed/
+    On Mac: <project_root>/data_process/<H>/<H>-processed/
+    Override: $MIMIC_PROCESSED_DIR (only when hospital == "MIMIC-IV").
 
-    Returns:
-        Absolute Path to the <hospital>-processed/ directory.
-        The leaf directory is mkdir-ed if missing (parent must already exist).
-
-    Raises:
-        FileNotFoundError if no candidate's parent directory exists. This
-        means the project layout doesn't have data_process/<hospital>/ at
-        all — likely a wrong --hospital flag or a fresh clone with no data.
+    The leaf dir is auto-mkdir'd if missing.
     """
-    candidates: list[Path] = []
-
-    # --- Hospital-specific HPC overrides ---
     if hospital == "MIMIC-IV":
         env_override = os.environ.get("MIMIC_PROCESSED_DIR")
         if env_override:
-            candidates.append(Path(env_override))
-        candidates.append(
-            Path("/blue/mei.liu/lideyi/MAS-NAS/data_process/MIMIC-IV/MIMIC-IV-processed")
-        )
+            p = Path(env_override)
+            p.mkdir(parents=True, exist_ok=True)
+            return p
 
-    # --- Generic project-relative fallback (works on Mac and on any host
-    #     where the repo and data tree live together) ---
-    candidates.append(_PROJECT_ROOT / "data_process" / hospital / f"{hospital}-processed")
+    base = _HPC_PROJECT_ROOT if _is_hpc() else _PROJECT_ROOT
+    p = base / "data_process" / hospital / f"{hospital}-processed"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
 
-    for cand in candidates:
-        if cand.parent.exists():
-            cand.mkdir(parents=True, exist_ok=True)
-            return cand
 
-    raise FileNotFoundError(
-        f"Cannot resolve processed dir for hospital={hospital!r}; "
-        f"tried (in order): {[str(c) for c in candidates]}"
-    )
+def get_checkpoint_dir(hospital: str) -> Path:
+    """Resolve where the pretrain MLM checkpoint (.pt, ~100-300 MB) lives.
+
+    On HPC: /blue/mei.liu/lideyi/MAS-NAS/results/<H>/checkpoint_mlm/
+    On Mac: <project_root>/results/<H>/checkpoint_mlm/
+    Override: $MIMIC_CHECKPOINT_DIR (only when hospital == "MIMIC-IV").
+
+    Big files only — small outputs (CSVs / JSONs / PNGs) keep using the
+    repo-local results/ dir so git can track them.
+
+    The leaf dir is auto-mkdir'd if missing.
+    """
+    if hospital == "MIMIC-IV":
+        env_override = os.environ.get("MIMIC_CHECKPOINT_DIR")
+        if env_override:
+            p = Path(env_override)
+            p.mkdir(parents=True, exist_ok=True)
+            return p
+
+    base = _HPC_PROJECT_ROOT if _is_hpc() else _PROJECT_ROOT
+    p = base / "results" / hospital / "checkpoint_mlm"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
