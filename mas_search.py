@@ -40,6 +40,7 @@ from utils.dataset import FineTuneEHRDataset, batcher
 from utils.engine import evaluate
 from utils.device_helpers import dataloader_kwargs, pick_device
 from utils.task_registry import task_info, ALL_TASKS
+from utils.paths import get_processed_root
 from run_pipeline import build_tokenizer, pretrain
 from model.supernet_transformer import TransformerSuper
 from dataset_summary import summarize_dataset
@@ -68,7 +69,7 @@ SUMMARY_FEATURE_COLS = [
 
 def _compute_target_summary(hospital):
     """Compute dataset summary features for the target hospital."""
-    data_root = Path(f"./data_process/{hospital}/{hospital}-processed")
+    data_root = get_processed_root(hospital)
     pretrain_path = data_root / "mimic_pretrain.pkl"
     downstream_path = data_root / "mimic_downstream.pkl"
 
@@ -363,7 +364,7 @@ def main():
     tracer.log_kv("lr", args.lr)
 
     # --- Load data ---
-    data_root = Path(f"./data_process/{args.hospital}/{args.hospital}-processed")
+    data_root = get_processed_root(args.hospital)
     full_data_path = data_root / "mimic.pkl"
     pretrain_data_path = data_root / "mimic_pretrain.pkl"
     # Per-task split — binary tasks share mimic_downstream.pkl; multilabel

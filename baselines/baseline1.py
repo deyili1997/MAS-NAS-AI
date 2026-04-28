@@ -52,6 +52,7 @@ from utils.engine import evaluate  # noqa: E402
 from utils.seed import set_random_seed  # noqa: E402
 from utils.device_helpers import dataloader_kwargs, pick_device, empty_cache  # noqa: E402
 from utils.task_registry import task_info, ALL_TASKS  # noqa: E402
+from utils.paths import get_processed_root  # noqa: E402
 from model.supernet_transformer import TransformerSuper  # noqa: E402
 
 
@@ -329,7 +330,7 @@ def main():
     os.chdir(_MAS_NAS_DIR)
     print(f"Working directory: {os.getcwd()}")
 
-    data_root = Path(f"./data_process/{args.hospital}/{args.hospital}-processed")
+    data_root = get_processed_root(args.hospital)
     full_data_path = data_root / "mimic.pkl"
     pretrain_data_path = data_root / "mimic_pretrain.pkl"
     finetune_data_path = data_root / task_info(args.task)["data_pkl"]

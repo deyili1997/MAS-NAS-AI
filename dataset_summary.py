@@ -13,6 +13,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from utils.paths import get_processed_root
+
 
 def parse_args():
     p = argparse.ArgumentParser(description="Generate dataset metadata summary")
@@ -101,7 +103,7 @@ def summarize_dataset(df, prefix):
 
 def process_hospital(hospital, output_dir):
     """Process one hospital: load data, compute stats, save CSV."""
-    data_root = Path(f"./data_process/{hospital}/{hospital}-processed")
+    data_root = get_processed_root(hospital)
     pretrain_path = data_root / "mimic_pretrain.pkl"
     downstream_path = data_root / "mimic_downstream.pkl"
 

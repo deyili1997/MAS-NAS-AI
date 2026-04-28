@@ -23,6 +23,7 @@ from utils.dataset import PreTrainEHRDataset, FineTuneEHRDataset, batcher
 from utils.engine import sample_configs, train_one_epoch, evaluate, evaluate_mlm
 from utils.device_helpers import dataloader_kwargs, snapshot_sd_cpu, pick_device, empty_cache
 from utils.task_registry import task_info, ALL_TASKS, is_multilabel
+from utils.paths import get_processed_root
 from model.supernet_transformer import TransformerSuper
 
 
@@ -579,7 +580,7 @@ def main():
     print(f"Device: {device}")
 
     # --- Data paths ---
-    data_root = Path(f"./data_process/{args.hospital}/{args.hospital}-processed")
+    data_root = get_processed_root(args.hospital)
     full_data_path = data_root / "mimic.pkl"
     pretrain_data_path = data_root / "mimic_pretrain.pkl"
 

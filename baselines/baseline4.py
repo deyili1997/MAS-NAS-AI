@@ -73,6 +73,7 @@ from utils.engine import evaluate  # noqa: E402
 from utils.seed import set_random_seed  # noqa: E402
 from utils.device_helpers import dataloader_kwargs, pick_device, empty_cache  # noqa: E402
 from utils.task_registry import task_info, ALL_TASKS  # noqa: E402
+from utils.paths import get_processed_root  # noqa: E402
 from model.supernet_transformer import TransformerSuper  # noqa: E402
 
 
@@ -446,7 +447,7 @@ def main():
     print(f"Working directory: {os.getcwd()}")
 
     # --- Data ---
-    data_root = Path(f"./data_process/{args.hospital}/{args.hospital}-processed")
+    data_root = get_processed_root(args.hospital)
     full_data = pickle.load(open(data_root / "mimic.pkl", "rb"))
     tokenizer = build_tokenizer(full_data, ["[PAD]", "[CLS]", "[MASK]"])
     max_adm = full_data.groupby("SUBJECT_ID")["HADM_ID"].nunique().max()

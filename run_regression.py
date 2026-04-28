@@ -38,6 +38,7 @@ from utils.dataset import PreTrainEHRDataset, FineTuneEHRDataset, batcher
 from utils.engine import sample_configs, train_one_epoch, evaluate_mlm
 from utils.device_helpers import dataloader_kwargs, snapshot_sd_cpu, pick_device, empty_cache
 from utils.task_registry import task_info, ALL_TASKS
+from utils.paths import get_processed_root
 from model.supernet_transformer import TransformerSuper
 from run_pipeline import build_tokenizer, count_subnet_params, count_subnet_flops, CHOICES
 from agents.experiment_agent import _finetune_one_arch
@@ -421,7 +422,7 @@ def main():
     print(f"Target: {args.hospital} / {args.task}   k = {args.k}")
 
     # --- Data ---
-    data_root = Path(f"./data_process/{args.hospital}/{args.hospital}-processed")
+    data_root = get_processed_root(args.hospital)
     with open(data_root / "mimic.pkl", "rb") as f:
         full_data = pickle.load(f)
     with open(data_root / "mimic_pretrain.pkl", "rb") as f:
