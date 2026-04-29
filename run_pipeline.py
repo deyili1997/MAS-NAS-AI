@@ -218,6 +218,41 @@ def pretrain(args, tokenizer, pretrain_data, max_adm, device):
                             collate_fn=batcher(tokenizer), shuffle=False, **dl_kwargs)
 
     vocab_size = len(tokenizer.vocab.id2word)
+
+    # ---- Cache check: ONE supernet ckpt per hospital, shared across all entry
+    # points (run_pipeline / run_regression / mas_search / baselines). Canonical
+    # path: <get_checkpoint_dir(hospital)>/mlm_model.pt.
+    # If exists with matching supernet config → reuse, skip pretrain.
+    # If exists with different config → warn, retrain, overwrite.
+    save_dir = get_checkpoint_dir(args.hospital)
+    ckpt_path = save_dir / "mlm_model.pt"
+    if ckpt_path.exists():
+        try:
+            existing = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+        except Exception as e:
+            print(f"[Pretrain] ⚠ Cannot load existing ckpt {ckpt_path}: {e}")
+            print(f"  Will retrain and overwrite.")
+            existing = None
+        if existing is not None:
+            match = (
+                existing.get("embed_dim") == int(args.embed_dim)
+                and existing.get("depth") == int(args.depth)
+                and existing.get("num_heads") == int(args.num_heads)
+                and existing.get("mlp_ratio") == float(args.mlp_ratio)
+                and existing.get("vocab_size") == int(vocab_size)
+                and existing.get("max_adm_num") == int(max_adm)
+            )
+            if match:
+                print(f"[Pretrain] ✓ Reusing existing supernet ckpt: {ckpt_path}")
+                return ckpt_path
+            print(f"[Pretrain] ⚠ Existing ckpt has different config, retraining + overwriting:")
+            print(f"  Existing: embed_dim={existing.get('embed_dim')}, depth={existing.get('depth')}, "
+                  f"num_heads={existing.get('num_heads')}, mlp_ratio={existing.get('mlp_ratio')}, "
+                  f"vocab_size={existing.get('vocab_size')}, max_adm_num={existing.get('max_adm_num')}")
+            print(f"  Requested: embed_dim={args.embed_dim}, depth={args.depth}, "
+                  f"num_heads={args.num_heads}, mlp_ratio={args.mlp_ratio}, "
+                  f"vocab_size={vocab_size}, max_adm_num={max_adm}")
+
     model = TransformerSuper(
         num_classes=0,
         vocab_size=vocab_size,
@@ -306,19 +341,10 @@ def pretrain(args, tokenizer, pretrain_data, max_adm, device):
         model.load_state_dict(best_model_sd)
     print(f"Best pretrain val_loss: {best_val_loss:.4f}")
 
-    # save checkpoint — big file (~100-300 MB), routed to /blue on HPC,
-    # repo-local results/ on Mac. Decoupled from --output_dir which still
-    # controls small outputs (metadata.csv, etc.).
-    save_dir = get_checkpoint_dir(args.hospital)
-    ckpt_path = save_dir / "mlm_model.pt"
-    # Cast every metadata field to a pure-Python type so the resulting
-    # ckpt only contains PyTorch-allowlisted globals (Tensor, OrderedDict,
-    # dict, list, int, float, str). This is what makes torch.load(...,
-    # weights_only=True) — the new PyTorch 2.6+ default — succeed on this
-    # ckpt without `add_safe_globals()` workarounds. `vocab_size` and
-    # `max_adm` come from pandas/numpy so they're commonly np.int64;
-    # argparse fields are already python types but we wrap them too as a
-    # zero-cost safety net against any future shape change.
+    # save checkpoint — `ckpt_path` was already defined at the cache-check
+    # block at the top of pretrain(). All metadata cast to pure-Python types
+    # (`int()` / `float()`) so torch.load(..., weights_only=True) succeeds
+    # without `add_safe_globals()` workarounds.
     torch.save({
         "model_state_dict": model.state_dict(),
         "choices": CHOICES,
