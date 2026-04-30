@@ -11,9 +11,11 @@ For each (hospital, task) group:
 import argparse
 import glob
 import os
+from io import BytesIO
 
 import matplotlib
 matplotlib.use("Agg")
+import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -110,10 +112,78 @@ def run_shap_for_group(X, y, group_name, output_dir):
     mean_abs = mean_abs.sort_values(ascending=False)
     mean_abs.to_csv(output_dir / "mean_abs_shap.csv", header=False)
 
+    # Combined panel: SHAP left + 4 univariate regression panels right
+    _save_shap_with_regression(X, y, shap_values, group_name, output_dir)
+
     print(f"  [{group_name}] saved to {output_dir}")
     print(f"    Mean |SHAP|: {mean_abs.to_dict()}")
 
     return mean_abs
+
+
+def _save_shap_with_regression(X, y, shap_values, group_name, output_dir):
+    """Save a side-by-side panel: SHAP bee swarm (left ~50%) + 2x2 grid of
+    univariate rank-vs-feature scatter with linear fit + Pearson r (right ~50%).
+
+    Why this combo: the SHAP plot answers 'how do features affect performance
+    in a multivariate sense', while the 4 regression panels answer 'is the
+    relationship monotonic / strong on the marginal level'. Together they give
+    a complete picture per (hospital, task).
+
+    Output: shap_with_regression.png in output_dir.
+    """
+    output_dir = Path(output_dir)
+
+    # ---- Step 1: render SHAP bee swarm to a memory buffer (shap.summary_plot
+    # creates its own figure and doesn't accept an `ax` param, so we capture
+    # it as a PNG and re-embed via imshow() in our composite figure).
+    buf = BytesIO()
+    plt.figure(figsize=(8, 6))
+    shap.summary_plot(shap_values, X, show=False)
+    plt.tight_layout()
+    plt.savefig(buf, format="png", dpi=180, bbox_inches="tight")
+    plt.close()
+    buf.seek(0)
+    shap_img = plt.imread(buf)
+    buf.close()
+
+    # ---- Step 2: build composite figure (1×2 layout where right is 2×2 grid)
+    fig = plt.figure(figsize=(16, 7))
+    gs = gridspec.GridSpec(
+        2, 4, figure=fig,
+        width_ratios=[1.5, 1.5, 1, 1],
+        wspace=0.35, hspace=0.45,
+    )
+
+    # Left half: embedded SHAP plot
+    ax_shap = fig.add_subplot(gs[:, 0:2])
+    ax_shap.imshow(shap_img)
+    ax_shap.axis("off")
+    ax_shap.set_title(f"SHAP feature importance — {group_name}", fontsize=11)
+
+    # Right half: 2×2 mini-scatter + linear fit per feature
+    for i, feat in enumerate(ARCH_COLS):
+        ax = fig.add_subplot(gs[i // 2, 2 + i % 2])
+        x_vals = X[feat].values.astype(float)
+        ax.scatter(x_vals, y, alpha=0.4, s=20, color="steelblue", edgecolors="none")
+        # Linear fit (require ≥ 2 distinct values to avoid ill-conditioned polyfit)
+        if len(np.unique(x_vals)) >= 2:
+            slope, intercept = np.polyfit(x_vals, y, 1)
+            x_line = np.linspace(x_vals.min(), x_vals.max(), 60)
+            ax.plot(x_line, slope * x_line + intercept, "r-", lw=1.5)
+            r = float(np.corrcoef(x_vals, y)[0, 1])
+            ax.set_title(f"{feat} (r={r:+.2f})", fontsize=10)
+        else:
+            ax.set_title(feat, fontsize=10)
+        ax.set_xlabel(feat, fontsize=9)
+        if i % 2 == 0:
+            ax.set_ylabel("Performance\n(higher = better)", fontsize=8)
+        ax.tick_params(labelsize=8)
+        ax.grid(True, alpha=0.3)
+
+    fig.suptitle(group_name, fontsize=13, y=0.99)
+    plt.savefig(output_dir / "shap_with_regression.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
 
 
 def main():
