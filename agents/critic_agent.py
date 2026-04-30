@@ -18,6 +18,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from run_pipeline import count_subnet_params, count_subnet_flops
 from utils.tracer import get_tracer
+from utils.llm_counter import increment as _llm_increment
 
 CHOICES = {
     "mlp_ratio": [1, 2, 4, 8],
@@ -193,6 +194,7 @@ def critique(context, search_state, proposals, max_params, client,
     max_retries = 5
     for attempt in range(max_retries):
         try:
+            _llm_increment()
             response = client.messages.create(
                 model=model,
                 max_tokens=4096,

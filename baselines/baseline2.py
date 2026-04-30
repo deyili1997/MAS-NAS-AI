@@ -67,6 +67,7 @@ from utils.seed import set_random_seed  # noqa: E402
 from utils.device_helpers import dataloader_kwargs, pick_device, empty_cache  # noqa: E402
 from utils.task_registry import task_info, ALL_TASKS  # noqa: E402
 from utils.paths import get_processed_root  # noqa: E402
+from utils.llm_counter import increment as _llm_increment, reset as _llm_reset, get as _llm_get  # noqa: E402
 from model.supernet_transformer import TransformerSuper  # noqa: E402
 
 
@@ -206,6 +207,7 @@ def _call_llm(prompt, client, model, max_retries=5):
     """Call Claude with exponential backoff on API errors."""
     for attempt in range(max_retries):
         try:
+            _llm_increment()
             response = client.messages.create(
                 model=model,
                 max_tokens=2048,
@@ -369,6 +371,8 @@ def parse_args():
 
 def main():
     args = parse_args()
+    t_start = time.perf_counter()
+    _llm_reset()
     set_random_seed(args.seed, deterministic=not args.cudnn_benchmark)
     np.random.seed(args.seed)
 
@@ -515,6 +519,7 @@ def main():
         return
 
     df = pd.DataFrame(val_results)
+    df["iteration"] = range(1, len(df) + 1)   # chronological eval order
     df["hospital"] = args.hospital
     df["task"] = args.task
 
@@ -589,6 +594,23 @@ def main():
     test_csv_path = output_dir / "baseline2_best.csv"
     pd.DataFrame([best_row]).to_csv(test_csv_path, index=False)
     print(f"\n  Best architecture + test results saved to {test_csv_path}")
+
+    # Run-level metadata for cost / fairness audit
+    meta = {
+        "method": "baseline2",
+        "hospital": args.hospital,
+        "task": args.task,
+        "seed": int(args.seed),
+        "budget": int(args.budget),
+        "max_params": int(args.max_params),
+        "model": str(args.model),
+        "ckpt_used": str(ckpt_path),
+        "wall_clock_sec": time.perf_counter() - t_start,
+        "llm_calls": _llm_get(),
+    }
+    with open(output_dir / "search_meta.json", "w") as f:
+        json.dump(meta, f, indent=2)
+    print(f"  Meta saved to {output_dir / 'search_meta.json'}  (LLM calls: {meta['llm_calls']})")
 
 
 if __name__ == "__main__":

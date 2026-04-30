@@ -74,6 +74,7 @@ from utils.seed import set_random_seed  # noqa: E402
 from utils.device_helpers import dataloader_kwargs, pick_device, empty_cache  # noqa: E402
 from utils.task_registry import task_info, ALL_TASKS  # noqa: E402
 from utils.paths import get_processed_root  # noqa: E402
+from utils.llm_counter import increment as _llm_increment, reset as _llm_reset, get as _llm_get  # noqa: E402
 from model.supernet_transformer import TransformerSuper  # noqa: E402
 
 
@@ -207,6 +208,7 @@ def _navigator_call(client, model, prompt, temperature, max_retries=5):
     level. Returns the strategy as plain text."""
     for attempt in range(max_retries):
         try:
+            _llm_increment()
             resp = client.messages.create(
                 model=model,
                 max_tokens=1024,
@@ -299,6 +301,7 @@ def _validate_proposal(prop):
 def _generator_call(client, model, prompt, temperature, max_retries=5):
     for attempt in range(max_retries):
         try:
+            _llm_increment()
             resp = client.messages.create(
                 model=model,
                 max_tokens=1024,
@@ -417,6 +420,8 @@ def parse_args():
 # ===========================================================================
 def main():
     args = parse_args()
+    t_start = time.perf_counter()
+    _llm_reset()
     set_random_seed(args.seed, deterministic=not args.cudnn_benchmark)
     np.random.seed(args.seed)
 
@@ -644,6 +649,7 @@ def main():
         return
 
     df = pd.DataFrame(completed)
+    df["iteration"] = range(1, len(df) + 1)   # chronological eval order
     df["hospital"] = args.hospital
     df["task"] = args.task
 
@@ -751,6 +757,25 @@ def main():
     test_csv = out_dir / "baseline4_best.csv"
     pd.DataFrame([best_row]).to_csv(test_csv, index=False)
     print(f"\n  Best architecture + test results saved to {test_csv}")
+
+    # Run-level metadata for cost / fairness audit
+    meta = {
+        "method": "baseline4",
+        "hospital": args.hospital,
+        "task": args.task,
+        "seed": int(args.seed),
+        "budget": int(args.budget),
+        "max_params": int(args.max_params),
+        "navigator_model": str(args.navigator_model),
+        "generator_model": str(args.generator_model),
+        "candidates_per_iter": int(args.candidates_per_iter),
+        "ckpt_used": str(ckpt_path),
+        "wall_clock_sec": time.perf_counter() - t_start,
+        "llm_calls": _llm_get(),
+    }
+    with open(out_dir / "search_meta.json", "w") as f:
+        json.dump(meta, f, indent=2)
+    print(f"  Meta saved to {out_dir / 'search_meta.json'}  (LLM calls: {meta['llm_calls']})")
 
 
 if __name__ == "__main__":

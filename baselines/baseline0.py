@@ -37,10 +37,12 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import pickle
 import random
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -180,6 +182,7 @@ def parse_args():
 # ---------------------------------------------------------------------------
 def main():
     args = parse_args()
+    t_start = time.perf_counter()
     set_random_seed(args.seed, deterministic=not args.cudnn_benchmark)
     np.random.seed(args.seed)
     random.seed(args.seed)
@@ -317,6 +320,7 @@ def main():
         return
 
     df = pd.DataFrame(val_results)
+    df["iteration"] = range(1, len(df) + 1)   # chronological eval order (preserved through later sort)
     df["hospital"] = args.hospital
     df["task"] = args.task
 
@@ -391,6 +395,22 @@ def main():
     test_csv_path = output_dir / "baseline0_best.csv"
     pd.DataFrame([best_row]).to_csv(test_csv_path, index=False)
     print(f"\n  Best architecture + test results saved to {test_csv_path}")
+
+    # Run-level metadata for cost / fairness audit
+    meta = {
+        "method": "baseline0",
+        "hospital": args.hospital,
+        "task": args.task,
+        "seed": int(args.seed),
+        "budget": int(args.budget),
+        "max_params": int(args.max_params),
+        "ckpt_used": str(ckpt_path),
+        "wall_clock_sec": time.perf_counter() - t_start,
+        "llm_calls": 0,    # random search — no LLM
+    }
+    with open(output_dir / "search_meta.json", "w") as f:
+        json.dump(meta, f, indent=2)
+    print(f"  Meta saved to {output_dir / 'search_meta.json'}")
 
 
 if __name__ == "__main__":

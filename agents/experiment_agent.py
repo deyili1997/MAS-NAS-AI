@@ -24,6 +24,7 @@ from model.supernet_transformer import TransformerSuper
 from utils.tracer import get_tracer
 from utils.device_helpers import snapshot_sd_cpu
 from utils.task_registry import task_info
+from utils.llm_counter import increment as _llm_increment
 
 
 def _to_internal_config(proposal):
@@ -310,6 +311,7 @@ def decide_strategy(context, search_state, client, model="claude-sonnet-4-6"):
     max_retries = 5
     for attempt in range(max_retries):
         try:
+            _llm_increment()
             response = client.messages.create(
                 model=model,
                 max_tokens=1024,

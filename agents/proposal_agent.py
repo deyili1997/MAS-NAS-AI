@@ -12,6 +12,7 @@ import json
 import time
 
 from utils.tracer import get_tracer
+from utils.llm_counter import increment as _llm_increment
 
 CHOICES = {
     "mlp_ratio": [1, 2, 4, 8],
@@ -203,6 +204,7 @@ def _call_llm(prompt, client, model, max_retries=5):
     """Call Claude and parse the response into a list of proposals."""
     for attempt in range(max_retries):
         try:
+            _llm_increment()
             response = client.messages.create(
                 model=model,
                 max_tokens=4096,
