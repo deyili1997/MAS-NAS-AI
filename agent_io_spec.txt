@@ -6,7 +6,7 @@ System: 3-agent system for Neural Architecture Search on EHR Transformers
 Orchestrator: mas_search.py
 
 Search Space (shared across all agents):
-  embed_dim  ∈ {16, 32, 64, 128}
+  embed_dim  ∈ {32, 64, 128, 256}
   depth      ∈ {1, 2, 4, 8}
   mlp_ratio  ∈ {1, 2, 4, 8}
   num_heads  ∈ {1, 2, 4, 8}

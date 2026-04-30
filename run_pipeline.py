@@ -33,7 +33,7 @@ from model.supernet_transformer import TransformerSuper
 CHOICES = {
     "mlp_ratio": [1, 2, 4, 8],
     "num_heads": [1, 2, 4, 8],
-    "embed_dim": [16, 32, 64, 128],
+    "embed_dim": [32, 64, 128, 256],
     "depth": [1, 2, 4, 8],
 }
 
@@ -52,7 +52,7 @@ def parse_args():
     p.add_argument("--weight_decay", type=float, default=1e-2)
     p.add_argument("--max_grad_norm", type=float, default=1.0)
     # supernet max dimensions (must be >= max of CHOICES)
-    p.add_argument("--embed_dim", type=int, default=128)
+    p.add_argument("--embed_dim", type=int, default=256)
     p.add_argument("--depth", type=int, default=8)
     p.add_argument("--num_heads", type=int, default=8)
     p.add_argument("--mlp_ratio", type=float, default=8)

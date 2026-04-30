@@ -41,7 +41,7 @@ The LLM only sees its own search trajectory in this run.
 Usage:
     python baselines/baseline3.py \\
         --hospital MIMIC-IV --task death \\
-        --max_params 1000000 --budget 20 --n_niches 16 \\
+        --max_params 2000000 --budget 20 --n_niches 16 \\
         --ckpt_path /blue/mei.liu/lideyi/MAS-NAS/results/MIMIC-IV/checkpoint_mlm/mlm_model.pt
 """
 
@@ -418,7 +418,7 @@ def parse_args():
     # Pretrain hyperparams (only used if ckpt_path absent)
     p.add_argument("--pretrain_epochs", type=int, default=50)
     p.add_argument("--pretrain_patience", type=int, default=5)
-    p.add_argument("--embed_dim", type=int, default=128)
+    p.add_argument("--embed_dim", type=int, default=256)
     p.add_argument("--depth", type=int, default=8)
     p.add_argument("--num_heads", type=int, default=8)
     p.add_argument("--mlp_ratio", type=float, default=8)

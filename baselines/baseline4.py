@@ -29,7 +29,7 @@ Same supernet ckpt + `_finetune_one_arch` + `--budget` semantics as baselines
 Usage:
     python baselines/baseline4.py \\
         --hospital MIMIC-IV --task death \\
-        --max_params 1000000 --budget 20 \\
+        --max_params 2000000 --budget 20 \\
         --candidates_per_iter 3 \\
         --ckpt_path /blue/mei.liu/lideyi/MAS-NAS/results/MIMIC-IV/checkpoint_mlm/mlm_model.pt
 """
@@ -371,7 +371,7 @@ def parse_args():
     # Pretrain hyperparams (only if no ckpt_path)
     p.add_argument("--pretrain_epochs", type=int, default=50)
     p.add_argument("--pretrain_patience", type=int, default=5)
-    p.add_argument("--embed_dim", type=int, default=128)
+    p.add_argument("--embed_dim", type=int, default=256)
     p.add_argument("--depth", type=int, default=8)
     p.add_argument("--num_heads", type=int, default=8)
     p.add_argument("--mlp_ratio", type=float, default=8)

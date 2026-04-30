@@ -17,7 +17,7 @@ from utils.llm_counter import increment as _llm_increment
 CHOICES = {
     "mlp_ratio": [1, 2, 4, 8],
     "num_heads": [1, 2, 4, 8],
-    "embed_dim": [16, 32, 64, 128],
+    "embed_dim": [32, 64, 128, 256],
     "depth": [1, 2, 4, 8],
 }
 

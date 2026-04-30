@@ -64,7 +64,7 @@ def parse_args():
     p.add_argument("--pretrain_patience", type=int, default=5)
 
     # Supernet max dims (AutoFormer path only)
-    p.add_argument("--embed_dim", type=int, default=128)
+    p.add_argument("--embed_dim", type=int, default=256)
     p.add_argument("--depth", type=int, default=8)
     p.add_argument("--num_heads", type=int, default=8)
     p.add_argument("--mlp_ratio", type=float, default=8)
