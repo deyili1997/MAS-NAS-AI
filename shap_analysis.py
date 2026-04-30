@@ -33,6 +33,15 @@ def parse_args():
     p.add_argument("--results_dir", type=str, default="./results",
                    help="Root results directory containing per-hospital metadata.csv files")
     p.add_argument("--output_dir", type=str, default="./results/shap_analysis")
+    p.add_argument("--interaction_main", type=str, nargs="+",
+                   default=["embed_dim"],
+                   choices=ARCH_COLS,
+                   help=("One or more architecture features to use as the 'main' "
+                         "feature in interaction plots. For each, produces a "
+                         "shap_interaction_<feat>.png with 3 sub-panels showing "
+                         "interactions with the OTHER architecture features. "
+                         "E.g. --interaction_main embed_dim depth → 2 PNGs per task. "
+                         "Default: just embed_dim."))
     return p.parse_args()
 
 
@@ -69,8 +78,13 @@ def compute_avg_rank(group: pd.DataFrame) -> np.ndarray:
     return ranks.mean(axis=1).values
 
 
-def run_shap_for_group(X, y, group_name, output_dir):
-    """Train XGBoost and compute SHAP for one (hospital, task) group."""
+def run_shap_for_group(X, y, group_name, output_dir, interaction_mains=("embed_dim",)):
+    """Train XGBoost and compute SHAP for one (hospital, task) group.
+
+    interaction_mains: iterable of architecture feature names to use as the
+        "main" feature in dependence/interaction plots. For each, produces
+        shap_interaction_<feat>.png with sub-panels for interactions with the
+        other 3 features. Default: only embed_dim."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -114,6 +128,11 @@ def run_shap_for_group(X, y, group_name, output_dir):
 
     # Combined panel: SHAP left + 4 univariate regression panels right
     _save_shap_with_regression(X, y, shap_values, group_name, output_dir)
+
+    # Interaction plot(s): one PNG per main feature requested via CLI
+    for main_feat in interaction_mains:
+        _save_shap_interaction(X, shap_values, group_name, output_dir,
+                               main_feature=main_feat)
 
     print(f"  [{group_name}] saved to {output_dir}")
     print(f"    Mean |SHAP|: {mean_abs.to_dict()}")
@@ -186,6 +205,66 @@ def _save_shap_with_regression(X, y, shap_values, group_name, output_dir):
     plt.close(fig)
 
 
+def _save_shap_interaction(X, shap_values, group_name, output_dir, main_feature="embed_dim"):
+    """SHAP dependence plots for `main_feature` × each other feature.
+
+    For each pair (main, other):
+      x = value of main_feature
+      y = SHAP value contributed by main_feature
+      color = value of other feature
+
+    Visual cue:
+      - Colors stack vertically by other-feature value → STRONG interaction
+        (main_feature's effect on prediction depends on other's value)
+      - Colors evenly mixed across y → no interaction (main effect only)
+      - Slope flips sign across colors → strong qualitative interaction
+
+    This is the canonical SHAP-style way to detect feature interactions.
+    Output: shap_interaction_<main_feature>.png in output_dir.
+    """
+    output_dir = Path(output_dir)
+    other_features = [f for f in ARCH_COLS if f != main_feature]
+    if not other_features:
+        return
+
+    main_idx = list(X.columns).index(main_feature)
+    main_vals = X[main_feature].values.astype(float)
+    main_shap = shap_values[:, main_idx]
+
+    n = len(other_features)
+    fig, axes = plt.subplots(1, n, figsize=(5.0 * n, 4.5))
+    if n == 1:
+        axes = [axes]
+
+    for ax, other in zip(axes, other_features):
+        other_vals = X[other].values.astype(float)
+        # Manual scatter (avoids version-dependent shap.dependence_plot ax= API)
+        sc = ax.scatter(
+            main_vals, main_shap,
+            c=other_vals, cmap="coolwarm",
+            s=30, alpha=0.75, edgecolors="none",
+        )
+        ax.axhline(0, color="gray", lw=0.5, linestyle="--", alpha=0.7)
+        ax.set_xlabel(main_feature, fontsize=10)
+        ax.set_ylabel(f"SHAP value of {main_feature}", fontsize=10)
+        ax.set_title(f"{main_feature} × {other}", fontsize=11)
+        ax.grid(True, alpha=0.25)
+        cbar = plt.colorbar(sc, ax=ax, fraction=0.046, pad=0.04)
+        cbar.set_label(other, fontsize=9)
+        cbar.ax.tick_params(labelsize=8)
+
+    fig.suptitle(
+        f"{group_name}: how {main_feature}'s effect interacts with other features",
+        fontsize=12, y=1.02,
+    )
+    plt.tight_layout()
+    plt.savefig(
+        output_dir / f"shap_interaction_{main_feature}.png",
+        dpi=150, bbox_inches="tight",
+    )
+    plt.close(fig)
+
+
 def main():
     args = parse_args()
     df = load_metadata(args.results_dir)
@@ -209,7 +288,10 @@ def main():
         X = group[ARCH_COLS].copy()
 
         group_output = Path(args.output_dir) / hospital / task
-        mean_abs = run_shap_for_group(X, y, group_name, group_output)
+        mean_abs = run_shap_for_group(
+            X, y, group_name, group_output,
+            interaction_mains=args.interaction_main,
+        )
 
         row = {"hospital": hospital, "task": task}
         for feat in ARCH_COLS:
