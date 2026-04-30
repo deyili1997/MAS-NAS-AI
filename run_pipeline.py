@@ -403,10 +403,11 @@ def _label_entropy_for_task(train_data, task):
 def _load_task_split(args, task):
     """Resolve the right (train, val, test) pkl for a task. For binary tasks
     they all share mimic_downstream.pkl; multilabel tasks each have their own
-    pkl created by MIMIC-IV.ipynb."""
+    pkl created by MIMIC-IV.ipynb. Uses get_processed_root() so the path
+    auto-routes to /blue/.../<hospital>/<hospital>-processed/ on HPC."""
     info = task_info(task)
     pkl_name = info["data_pkl"]
-    pkl_path = Path(f"./data_process/{args.hospital}/{args.hospital}-processed") / pkl_name
+    pkl_path = get_processed_root(args.hospital) / pkl_name
     return pickle.load(open(pkl_path, "rb"))
 
 
