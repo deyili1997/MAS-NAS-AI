@@ -6,9 +6,12 @@ Reads from `results/seed_<N>/<hospital>/search/<method>/<task>/`:
   - `<method>_search.csv`   — all evaluated architectures (with iteration col)
   - `search_meta.json`      — wall-clock, LLM calls, budget, seed, ...
 
-Produces 5 CSVs under `analyze/`:
+Produces 6 CSVs under `analyze/`:
   - main_table.csv         Table 1 (paper main): best AUPRC per method × task,
-                           mean ± std over seeds
+                           mean ± std over seeds (all methods @ same budget)
+  - efficiency_table.csv   Table 2 (paper main): MAS-NAS @ evals=30 vs baselines
+                           @ evals=100 — "70% less compute, still wins". Extracted
+                           from same search.csv (one run gives both tables).
   - supp_table.csv         Supplementary: all 4 metrics
   - arch_table.csv         Selected architectures' params/FLOPs (verifies
                            --max_params constraint met across all methods)
@@ -19,6 +22,7 @@ Produces 5 CSVs under `analyze/`:
 Usage:
     python analyze/aggregate_results.py --hospital MIMIC-IV
     python analyze/aggregate_results.py --hospital MIMIC-IV --results_root /blue/.../results
+    python analyze/aggregate_results.py --hospital MIMIC-IV --mas_budget 30 --baseline_budget 100
 """
 from __future__ import annotations
 
@@ -253,6 +257,145 @@ def build_cost_table(records: dict, output_path: Path) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Efficiency table — MAS-NAS @ small budget vs baselines @ full budget ★
+# ---------------------------------------------------------------------------
+def build_efficiency_table(
+    results_root: Path,
+    hospital: str,
+    records: dict,
+    output_path: Path,
+    mas_budget: int = 30,
+    baseline_budget: int = 100,
+) -> pd.DataFrame:
+    """Per (method, task): cumulative-max val_auprc at each method's intended
+    cutoff (mas_budget for MAS, baseline_budget for all baselines).
+
+    Core paper claim (Table 2): MAS-NAS at evals≤30 already matches/exceeds
+    baselines at evals≤100. We extract both budgets from the SAME `*_search.csv`
+    (all methods run at full budget, then we slice the prefix) — ensures
+    Table 1 (full-budget fair comparison) and Table 2 (efficiency) come from
+    one set of jobs.
+
+    For wall-clock and LLM calls at the partial cutoff, we report a
+    proportional estimate: (cutoff / total_evals) * total_wall_clock_sec.
+    This assumes per-eval cost is roughly constant — true in practice since
+    every evaluated arch goes through the same finetune pipeline.
+
+    Also reports the `num_params` and `flops` of the BEST arch in the prefix
+    (the one whose val_auprc was max). Lets reviewers see whether MAS@30
+    achieves its win with a smaller/cheaper architecture vs baselines@100.
+    """
+    rows = []
+    for method in METHODS:
+        cutoff = mas_budget if method == "mas" else baseline_budget
+        for task in TASKS:
+            seeds = get_seeds(records, method, task)
+            best_at_cutoff: list = []
+            evals_used: list = []
+            best_params: list = []        # num_params of arch with max val_auprc in prefix
+            best_flops: list = []         # flops of same arch
+            wall_min_at_cutoff: list = []
+            llm_calls_at_cutoff: list = []
+            wall_min_full: list = []
+            llm_calls_full: list = []
+
+            for s in seeds:
+                # search.csv lives next to *_best.csv, same task_dir
+                search_csv = (
+                    results_root / f"seed_{s}" / hospital / "search"
+                    / method / task / f"{method}_search.csv"
+                )
+                if not search_csv.exists():
+                    continue
+                try:
+                    df = pd.read_csv(search_csv)
+                except Exception as e:
+                    print(f"  ⚠ Cannot read {search_csv}: {e}")
+                    continue
+                if "val_auprc" not in df.columns:
+                    continue
+                if "iteration" not in df.columns:
+                    df["iteration"] = range(1, len(df) + 1)
+                df = df.sort_values("iteration").reset_index(drop=True)
+
+                df_cut = df[df["iteration"] <= cutoff].dropna(subset=["val_auprc"])
+                if len(df_cut) == 0:
+                    continue
+                # Locate the best architecture in the prefix (max val_auprc)
+                best_idx = df_cut["val_auprc"].idxmax()
+                best_row = df_cut.loc[best_idx]
+                best_at_cutoff.append(float(best_row["val_auprc"]))
+                evals_used.append(len(df_cut))
+                if "num_params" in df_cut.columns and not pd.isna(best_row.get("num_params")):
+                    best_params.append(float(best_row["num_params"]))
+                if "flops" in df_cut.columns and not pd.isna(best_row.get("flops")):
+                    best_flops.append(float(best_row["flops"]))
+
+                # Proportional cost estimate
+                meta = records[(method, task, s)]["meta"]
+                total_evals = max(len(df), 1)
+                frac = len(df_cut) / total_evals
+                if "wall_clock_sec" in meta:
+                    full_wc_min = meta["wall_clock_sec"] / 60.0
+                    wall_min_full.append(full_wc_min)
+                    wall_min_at_cutoff.append(full_wc_min * frac)
+                if "llm_calls" in meta:
+                    full_llm = meta["llm_calls"]
+                    llm_calls_full.append(full_llm)
+                    llm_calls_at_cutoff.append(full_llm * frac)
+
+            if not best_at_cutoff:
+                continue
+
+            rows.append({
+                "method": METHOD_DISPLAY[method],
+                "task": TASK_DISPLAY[task],
+                "budget_cutoff": cutoff,
+                "evals_used_mean": round(float(np.mean(evals_used)), 1),
+                "best_val_auprc_mean_pct": round(float(np.mean(best_at_cutoff)) * 100, 2),
+                "best_val_auprc_std_pct": (
+                    round(float(np.std(best_at_cutoff, ddof=1)) * 100, 2)
+                    if len(best_at_cutoff) > 1 else 0.0
+                ),
+                "best_arch_num_params_mean": (
+                    int(np.mean(best_params)) if best_params else None
+                ),
+                "best_arch_num_params_std": (
+                    int(np.std(best_params, ddof=1))
+                    if len(best_params) > 1 else 0
+                ),
+                "best_arch_flops_mean": (
+                    int(np.mean(best_flops)) if best_flops else None
+                ),
+                "best_arch_flops_std": (
+                    int(np.std(best_flops, ddof=1))
+                    if len(best_flops) > 1 else 0
+                ),
+                "wall_clock_min_at_cutoff_mean": (
+                    round(float(np.mean(wall_min_at_cutoff)), 1)
+                    if wall_min_at_cutoff else None
+                ),
+                "wall_clock_min_full_mean": (
+                    round(float(np.mean(wall_min_full)), 1)
+                    if wall_min_full else None
+                ),
+                "llm_calls_at_cutoff_mean": (
+                    round(float(np.mean(llm_calls_at_cutoff)), 1)
+                    if llm_calls_at_cutoff else 0
+                ),
+                "llm_calls_full_mean": (
+                    round(float(np.mean(llm_calls_full)), 1)
+                    if llm_calls_full else 0
+                ),
+                "n_seeds": len(best_at_cutoff),
+            })
+
+    df = pd.DataFrame(rows)
+    df.to_csv(output_path, index=False)
+    return df
+
+
+# ---------------------------------------------------------------------------
 # Significance table — paired Wilcoxon: MAS-NAS vs each baseline
 # ---------------------------------------------------------------------------
 def build_significance_table(records: dict, output_path: Path) -> pd.DataFrame:
@@ -339,7 +482,11 @@ def main():
     p.add_argument("--hospital", type=str, required=True,
                    help="Hospital name, e.g. MIMIC-IV.")
     p.add_argument("--out_dir", type=str, default="./analyze",
-                   help="Where to write 5 output CSVs.")
+                   help="Where to write 6 output CSVs.")
+    p.add_argument("--mas_budget", type=int, default=30,
+                   help="MAS-NAS budget cutoff for efficiency table (default: 30).")
+    p.add_argument("--baseline_budget", type=int, default=100,
+                   help="Baseline budget cutoff for efficiency table (default: 100).")
     args = p.parse_args()
 
     results_root = Path(args.results_root).resolve()
@@ -356,35 +503,47 @@ def main():
         print("⚠ No records. Check --results_root + glob layout (results/seed_*/hospital/search/method/task/).")
         return
 
-    print("\n[1/5] Main table — AUPRC mean ± std")
+    print("\n[1/6] Main table — AUPRC mean ± std")
     df_main = build_main_table(records, out_dir / "main_table.csv")
     print(df_main.to_string(index=False))
 
-    print("\n[2/5] Supplementary table — all 4 metrics")
+    print(f"\n[2/6] Efficiency table — MAS@{args.mas_budget} vs baselines@{args.baseline_budget}")
+    df_eff = build_efficiency_table(
+        results_root, args.hospital, records,
+        out_dir / "efficiency_table.csv",
+        mas_budget=args.mas_budget, baseline_budget=args.baseline_budget,
+    )
+    if len(df_eff) > 0:
+        print(df_eff.to_string(index=False))
+    else:
+        print("  (empty — no search.csv found at expected path)")
+
+    print("\n[3/6] Supplementary table — all 4 metrics")
     df_supp = build_supp_table(records, out_dir / "supp_table.csv")
     print(f"  Rows: {len(df_supp)}  →  {out_dir / 'supp_table.csv'}")
 
-    print("\n[3/5] Architecture table — selected models' size/FLOPs")
+    print("\n[4/6] Architecture table — selected models' size/FLOPs")
     df_arch = build_arch_table(records, out_dir / "arch_table.csv")
     print(df_arch.to_string(index=False))
 
-    print("\n[4/5] Cost table — wall-clock + LLM calls")
+    print("\n[5/6] Cost table — wall-clock + LLM calls (full budget)")
     df_cost = build_cost_table(records, out_dir / "cost_table.csv")
     print(df_cost.to_string(index=False))
 
-    print("\n[5/5] Significance table — Wilcoxon w/ Holm-Bonferroni")
+    print("\n[6/6] Significance table — Wilcoxon w/ Holm-Bonferroni")
     df_sig = build_significance_table(records, out_dir / "significance.csv")
     print(f"  Rows: {len(df_sig)}  →  {out_dir / 'significance.csv'}")
     if len(df_sig) > 0:
         print("  Sample rows:")
         print(df_sig.head(10).to_string(index=False))
 
-    print(f"\n✓ All 5 tables saved to {out_dir}/")
-    print("  - main_table.csv      (Table 1, paper main)")
-    print("  - supp_table.csv      (Supplementary)")
-    print("  - arch_table.csv      (size constraint audit)")
-    print("  - cost_table.csv      (compute fairness audit)")
-    print("  - significance.csv    (Wilcoxon + Holm-Bonferroni)")
+    print(f"\n✓ All 6 tables saved to {out_dir}/")
+    print("  - main_table.csv        (Table 1, paper main)")
+    print("  - efficiency_table.csv  (Table 2, paper main: MAS@30 vs baselines@100)")
+    print("  - supp_table.csv        (Supplementary)")
+    print("  - arch_table.csv        (size constraint audit)")
+    print("  - cost_table.csv        (compute fairness audit, full budget)")
+    print("  - significance.csv      (Wilcoxon + Holm-Bonferroni)")
 
 
 if __name__ == "__main__":
