@@ -303,7 +303,9 @@ def _load_shap_importance(results_dir, hospital, task):
     return {str(k): float(v) for k, v in zip(df.index, df.iloc[:, 0])}
 
 
-def gather_historical_context(hospital, task, max_params, results_dir, top_k):
+def gather_historical_context(hospital, task, max_params, results_dir, top_k,
+                              exclude_exact_task_from_history=False,
+                              no_history=False):
     """
     Gather historical context for the target hospital and task.
 
@@ -312,8 +314,28 @@ def gather_historical_context(hospital, task, max_params, results_dir, top_k):
     `matched_task_similarity` is None for exact task match, else the cosine
     similarity (in 6-D task feature space) between target and matched source
     task — useful for downstream agents to calibrate trust in the prior.
+
+    Robustness-ablation knobs (Fig 5):
+      - `exclude_exact_task_from_history` (bool): drop rows where the target
+        task already exists in the matched source hospital's metadata, forcing
+        the cosine-fallback path even when an exact match exists. Used by the
+        `mas_loto` ablation method.
+      - `no_history` (bool): bypass everything and return an empty context
+        dict (top_k_archs=[], shap_importance={}). Used by `mas_cold`.
     """
     print("\n[Historical Context]")
+
+    if no_history:
+        print("  [COLD] --no_history set; skipping historical context entirely.")
+        return {
+            "target_summary": {"hospital": hospital},
+            "similar_hospital": None,
+            "similarity_score": 0.0,
+            "matched_task": task,
+            "matched_task_similarity": None,
+            "top_k_archs": [],
+            "shap_importance": {},
+        }
 
     print(f"  Computing dataset summary for {hospital}...")
     target_summary = _compute_target_summary(hospital)
@@ -364,6 +386,20 @@ def gather_historical_context(hospital, task, max_params, results_dir, top_k):
         metadata_df = pd.concat([pd.read_csv(f) for f in metadata_files], ignore_index=True)
     else:
         metadata_df = pd.DataFrame()
+
+    # LOTO ablation: drop the (similar_hospital, target_task) rows so the
+    # exact-match branch in _get_top_k_archs misses, forcing the cosine
+    # task-feature fallback. This validates Plan A's robustness when no
+    # historical record exists for the target task.
+    if exclude_exact_task_from_history and not metadata_df.empty:
+        n_before = len(metadata_df)
+        metadata_df = metadata_df[~(
+            (metadata_df["hospital"] == similar_hospital) &
+            (metadata_df["task"] == task)
+        )].copy()
+        n_dropped = n_before - len(metadata_df)
+        print(f"  [LOTO] Dropped {n_dropped} rows for ({similar_hospital}, {task}) "
+              f"— forcing cosine fallback path")
 
     top_k_archs, matched_task, matched_task_similarity = _get_top_k_archs(
         metadata_df, similar_hospital, task, max_params, top_k,
@@ -420,6 +456,16 @@ def parse_args():
                    help="Number of historical best architectures to retrieve")
     p.add_argument("--results_dir", type=str, default="./results",
                    help="Directory with past experiment results")
+
+    # Robustness ablation flags (Fig 5)
+    p.add_argument("--exclude_exact_task_from_history", action="store_true",
+                   help="LOTO ablation: drop rows where task==target from metadata "
+                        "before _get_top_k_archs, forcing the cosine-similarity "
+                        "fallback path. Used by mas_loto.")
+    p.add_argument("--no_history", action="store_true",
+                   help="Cold-start ablation: skip historical context entirely "
+                        "(empty top_k_archs, no SHAP, no similar-hospital). "
+                        "Used by mas_cold.")
 
     # Pretrained model (optional — if omitted, pretrain runs automatically)
     p.add_argument("--ckpt_path", type=str, default=None,
@@ -478,19 +524,35 @@ def _compute_avg_rank(df):
     return ranks.mean(axis=1)
 
 
+def _method_name(args) -> str:
+    """Resolve method name (and output subdir) from ablation flags.
+
+    Default = `mas`; the two robustness-ablation variants get distinct names
+    so their outputs don't clobber the regular MAS run:
+      --exclude_exact_task_from_history  → `mas_loto`
+      --no_history                       → `mas_cold`
+    """
+    if getattr(args, "no_history", False):
+        return "mas_cold"
+    if getattr(args, "exclude_exact_task_from_history", False):
+        return "mas_loto"
+    return "mas"
+
+
 def main():
     args = parse_args()
     t_start = time.perf_counter()
     _llm_reset()
     set_random_seed(args.seed, deterministic=not args.cudnn_benchmark)
     device = pick_device()
+    method_name = _method_name(args)
     print(f"Device: {device}")
-    print(f"Target: {args.hospital} / {args.task}")
+    print(f"Target: {args.hospital} / {args.task}  (method={method_name})")
     print(f"Budget: {args.budget} architectures, max_params={args.max_params:,}")
 
     # --- Initialize I/O tracer ---
-    # Output layout: results/<hospital>/search/mas/<task>/{mas_search.csv, mas_best.csv, agent_io_log.txt}
-    output_dir = Path(args.results_dir) / args.hospital / "search" / "mas" / args.task
+    # Output layout: results/<hospital>/search/<method>/<task>/{<method>_search.csv, <method>_best.csv, agent_io_log.txt}
+    output_dir = Path(args.results_dir) / args.hospital / "search" / method_name / args.task
     output_dir.mkdir(parents=True, exist_ok=True)
     tracer = Tracer(str(output_dir / "agent_io_log.txt"))
     set_global_tracer(tracer)
@@ -569,6 +631,8 @@ def main():
         max_params=args.max_params,
         results_dir=args.results_dir,
         top_k=args.top_k,
+        exclude_exact_task_from_history=args.exclude_exact_task_from_history,
+        no_history=args.no_history,
     )
 
     tracer.log_section("PHASE 0 — HISTORICAL CONTEXT")
@@ -779,10 +843,10 @@ def main():
     df["avg_rank"] = val_rank.mean(axis=1)
     df = df.sort_values("avg_rank").reset_index(drop=True)
 
-    # Save all val results — same dir as the tracer (results/<hospital>/search/mas/<task>/)
-    output_dir = Path(args.results_dir) / args.hospital / "search" / "mas" / args.task
+    # Save all val results — same dir as the tracer (results/<hospital>/search/<method>/<task>/)
+    output_dir = Path(args.results_dir) / args.hospital / "search" / method_name / args.task
     output_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = output_dir / "mas_search.csv"
+    csv_path = output_dir / f"{method_name}_search.csv"
     df.to_csv(csv_path, index=False)
     print(f"\nSaved {len(df)} val results to {csv_path}")
 
@@ -861,7 +925,7 @@ def main():
     best_row["test_f1"] = test_metrics["f1"]
     best_row["test_auroc"] = test_metrics["auroc"]
     best_row["test_auprc"] = test_metrics["auprc"]
-    test_csv_path = output_dir / "mas_best.csv"
+    test_csv_path = output_dir / f"{method_name}_best.csv"
     pd.DataFrame([best_row]).to_csv(test_csv_path, index=False)
     print(f"\n  Best architecture + test results saved to {test_csv_path}")
 

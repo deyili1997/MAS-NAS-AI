@@ -6,18 +6,21 @@ Reads from `results/seed_<N>/<hospital>/search/<method>/<task>/`:
   - `<method>_search.csv`   — all evaluated architectures (with iteration col)
   - `search_meta.json`      — wall-clock, LLM calls, budget, seed, ...
 
-Produces 6 CSVs under `analyze/`:
-  - main_table.csv         Table 1 (paper main): best AUPRC per method × task,
-                           mean ± std over seeds (all methods @ same budget)
-  - efficiency_table.csv   Table 2 (paper main): MAS-NAS @ evals=30 vs baselines
-                           @ evals=100 — "70% less compute, still wins". Extracted
-                           from same search.csv (one run gives both tables).
-  - supp_table.csv         Supplementary: all 4 metrics
-  - arch_table.csv         Selected architectures' params/FLOPs (verifies
-                           --max_params constraint met across all methods)
-  - cost_table.csv         Wall-clock + LLM call counts (compute-fairness audit)
-  - significance.csv       Paired Wilcoxon: MAS-NAS vs each baseline, with
-                           Holm-Bonferroni correction across 5 baselines
+Produces 7 CSVs under `analyze/`:
+  - main_table.csv             Table 1 (paper main): best AUPRC per method × task,
+                               mean ± std over seeds (all methods @ same budget)
+  - efficiency_table.csv       Table 2 (paper main): MAS-NAS @ evals=30 vs baselines
+                               @ evals=100 — "70% less compute, still wins". Extracted
+                               from same search.csv (one run gives both tables).
+  - loto_ablation_table.csv    Fig 5 companion: per-task comparison of
+                               {MAS-exact, MAS-LOTO, MAS-cold, best-LLM-baseline}
+                               with delta columns. Validates Plan A robustness.
+  - supp_table.csv             Supplementary: all 4 metrics
+  - arch_table.csv             Selected architectures' params/FLOPs (verifies
+                               --max_params constraint met across all methods)
+  - cost_table.csv             Wall-clock + LLM call counts (compute-fairness audit)
+  - significance.csv           Paired Wilcoxon: MAS-NAS vs each baseline, with
+                               Holm-Bonferroni correction across 5 baselines
 
 Usage:
     python analyze/aggregate_results.py --hospital MIMIC-IV
@@ -39,15 +42,23 @@ from statsmodels.stats.multitest import multipletests
 # ---------------------------------------------------------------------------
 # Display labels (paper-friendly)
 # ---------------------------------------------------------------------------
-METHODS = ["baseline0", "baseline1", "baseline2", "baseline3", "baseline4", "mas"]
+METHODS = ["baseline0", "baseline1", "baseline2", "baseline3", "baseline4",
+           "mas", "mas_loto", "mas_cold"]
 METHOD_DISPLAY = {
     "baseline0": "Random",
     "baseline1": "EA",
     "baseline2": "LLM-1shot",
     "baseline3": "LLMatic",
     "baseline4": "CoLLM-NAS",
-    "mas": "MAS-NAS",
+    "mas":      "MAS-NAS",
+    "mas_loto": "MAS-NAS (LOTO)",
+    "mas_cold": "MAS-NAS (cold)",
 }
+
+# Methods that compete with MAS as upper-bound LLM-based baselines.
+# `build_loto_ablation_table` automatically picks the best of these per task
+# to fill the "Best baseline" column in Fig 5's companion table.
+LLM_BASELINE_METHODS = ["baseline3", "baseline4"]
 
 TASKS = ["death", "stay", "readmission", "next_diag_6m_pheno", "next_diag_12m_pheno"]
 TASK_DISPLAY = {
@@ -396,6 +407,83 @@ def build_efficiency_table(
 
 
 # ---------------------------------------------------------------------------
+# LOTO + Cold-start robustness ablation — Fig 5 companion table ★
+# ---------------------------------------------------------------------------
+def build_loto_ablation_table(records: dict, output_path: Path) -> pd.DataFrame:
+    """Per-task comparison of {MAS-exact, MAS-LOTO, MAS-cold, best-LLM-baseline}.
+
+    For each task: aggregates test_auprc mean ± std across seeds, picks the
+    best LLM-based baseline (LLMatic or CoLLM-NAS) to compete against, and
+    reports four delta columns to support Fig 5's paper claims:
+
+      delta_loto_vs_exact      ≈ -0.5 ~ -1%   (graceful fallback)
+      delta_cold_vs_exact      typically lower (no prior at all)
+      delta_loto_vs_baseline   ≥ 0  ★ punchline: even LOTO beats baseline
+      delta_cold_vs_baseline   ≥ 0  multi-agent value beyond the prior
+
+    Reads the same `records` dict produced by `collect_results`, so it
+    requires the 5 methods (mas, mas_loto, mas_cold, baseline3, baseline4)
+    to all have *_best.csv files at expected paths.
+    """
+    rows = []
+    for task in TASKS:
+        row = {"task": TASK_DISPLAY[task]}
+
+        # Helper: aggregate AUPRC across seeds for one method
+        def _stats(method):
+            seeds = get_seeds(records, method, task)
+            scores = [records[(method, task, s)]["best"].get("test_auprc") for s in seeds]
+            scores = [x for x in scores if x is not None and not pd.isna(x)]
+            if not scores:
+                return None, None, 0
+            mean_pct = float(np.mean(scores)) * 100
+            std_pct = float(np.std(scores, ddof=1)) * 100 if len(scores) > 1 else 0.0
+            return round(mean_pct, 2), round(std_pct, 2), len(scores)
+
+        # Three MAS conditions
+        for cond, key in [("exact", "mas"), ("loto", "mas_loto"), ("cold", "mas_cold")]:
+            mean, std, n = _stats(key)
+            row[f"mas_{cond}_mean_pct"] = mean
+            row[f"mas_{cond}_std_pct"] = std
+            row[f"mas_{cond}_n_seeds"] = n
+
+        # Best LLM-based baseline for this task (max mean AUPRC across LLMatic + CoLLM-NAS)
+        best_baseline_method = None
+        best_baseline_mean = -1.0
+        best_baseline_std = None
+        best_baseline_n = 0
+        for bm in LLM_BASELINE_METHODS:
+            mean, std, n = _stats(bm)
+            if mean is not None and mean > best_baseline_mean:
+                best_baseline_method = bm
+                best_baseline_mean = mean
+                best_baseline_std = std
+                best_baseline_n = n
+        row["best_baseline_method"] = METHOD_DISPLAY.get(best_baseline_method, best_baseline_method)
+        row["best_baseline_mean_pct"] = best_baseline_mean if best_baseline_method else None
+        row["best_baseline_std_pct"] = best_baseline_std
+        row["best_baseline_n_seeds"] = best_baseline_n
+
+        # Delta columns (None if either side missing)
+        def _delta(a_key, b_val):
+            a = row.get(a_key)
+            if a is None or b_val is None:
+                return None
+            return round(a - b_val, 2)
+
+        row["delta_loto_vs_exact"]    = _delta("mas_loto_mean_pct", row["mas_exact_mean_pct"])
+        row["delta_cold_vs_exact"]    = _delta("mas_cold_mean_pct", row["mas_exact_mean_pct"])
+        row["delta_loto_vs_baseline"] = _delta("mas_loto_mean_pct", row["best_baseline_mean_pct"])
+        row["delta_cold_vs_baseline"] = _delta("mas_cold_mean_pct", row["best_baseline_mean_pct"])
+
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    df.to_csv(output_path, index=False)
+    return df
+
+
+# ---------------------------------------------------------------------------
 # Significance table — paired Wilcoxon: MAS-NAS vs each baseline
 # ---------------------------------------------------------------------------
 def build_significance_table(records: dict, output_path: Path) -> pd.DataFrame:
@@ -530,20 +618,35 @@ def main():
     df_cost = build_cost_table(records, out_dir / "cost_table.csv")
     print(df_cost.to_string(index=False))
 
-    print("\n[6/6] Significance table — Wilcoxon w/ Holm-Bonferroni")
+    print("\n[6/7] Significance table — Wilcoxon w/ Holm-Bonferroni")
     df_sig = build_significance_table(records, out_dir / "significance.csv")
     print(f"  Rows: {len(df_sig)}  →  {out_dir / 'significance.csv'}")
     if len(df_sig) > 0:
         print("  Sample rows:")
         print(df_sig.head(10).to_string(index=False))
 
-    print(f"\n✓ All 6 tables saved to {out_dir}/")
-    print("  - main_table.csv        (Table 1, paper main)")
-    print("  - efficiency_table.csv  (Table 2, paper main: MAS@30 vs baselines@100)")
-    print("  - supp_table.csv        (Supplementary)")
-    print("  - arch_table.csv        (size constraint audit)")
-    print("  - cost_table.csv        (compute fairness audit, full budget)")
-    print("  - significance.csv      (Wilcoxon + Holm-Bonferroni)")
+    print("\n[7/7] LOTO ablation table — MAS-exact vs MAS-LOTO vs MAS-cold vs best-baseline")
+    df_loto = build_loto_ablation_table(records, out_dir / "loto_ablation_table.csv")
+    if len(df_loto) > 0:
+        cols_to_show = [
+            "task",
+            "mas_exact_mean_pct", "mas_loto_mean_pct", "mas_cold_mean_pct",
+            "best_baseline_method", "best_baseline_mean_pct",
+            "delta_loto_vs_exact", "delta_loto_vs_baseline",
+        ]
+        cols_to_show = [c for c in cols_to_show if c in df_loto.columns]
+        print(df_loto[cols_to_show].to_string(index=False))
+    else:
+        print("  (empty — no MAS or LLM-baseline records found yet)")
+
+    print(f"\n✓ All 7 tables saved to {out_dir}/")
+    print("  - main_table.csv           (Table 1, paper main)")
+    print("  - efficiency_table.csv     (Table 2, paper main: MAS@30 vs baselines@100)")
+    print("  - loto_ablation_table.csv  (Fig 5 companion: LOTO + cold-start robustness)")
+    print("  - supp_table.csv           (Supplementary)")
+    print("  - arch_table.csv           (size constraint audit)")
+    print("  - cost_table.csv           (compute fairness audit, full budget)")
+    print("  - significance.csv         (Wilcoxon + Holm-Bonferroni)")
 
 
 if __name__ == "__main__":
