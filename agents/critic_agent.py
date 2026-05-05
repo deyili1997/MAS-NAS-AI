@@ -15,10 +15,24 @@ import os
 import sys
 import time
 
+import numpy as np
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from run_pipeline import count_subnet_params, count_subnet_flops
 from utils.tracer import get_tracer
 from utils.llm_counter import increment as _llm_increment
+
+
+def _np_default(obj):
+    """numpy-aware default= for json.dumps. See agents/experiment_agent.py."""
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
 
 CHOICES = {
     "mlp_ratio": [1, 2, 4, 8],
@@ -41,7 +55,7 @@ def _build_prompt(context, search_state, proposals, max_params, strategy=None,
     )
 
     # Search space & constraints
-    parts.append(f"\n## Search Space\n{json.dumps(CHOICES)}\n")
+    parts.append(f"\n## Search Space\n{json.dumps(CHOICES, default=_np_default)}\n")
     parts.append(
         "All four values (embed_dim, depth, mlp_ratio, num_heads) are scalars.\n"
         "CONSTRAINT: embed_dim must be divisible by num_heads.\n"
@@ -55,7 +69,7 @@ def _build_prompt(context, search_state, proposals, max_params, strategy=None,
     if top_k:
         parts.append(f"\n## Historical Best Architectures (from similar hospital)\n")
         for i, arch in enumerate(top_k):
-            parts.append(f"  Top-{i+1}: {json.dumps(arch)}\n")
+            parts.append(f"  Top-{i+1}: {json.dumps(arch, default=_np_default)}\n")
 
     shap = context.get("shap_importance", {})
     if shap:
@@ -68,12 +82,12 @@ def _build_prompt(context, search_state, proposals, max_params, strategy=None,
     if completed:
         parts.append(f"\n## Already Tried ({len(completed)} architectures)\n")
         for exp in completed:
-            parts.append(f"  {json.dumps(exp)}\n")
+            parts.append(f"  {json.dumps(exp, default=_np_default)}\n")
 
     # Proposals to review
     parts.append(f"\n## Proposals to Review\n")
     for i, prop in enumerate(proposals):
-        parts.append(f"  Proposal {i}: {json.dumps(prop)}\n")
+        parts.append(f"  Proposal {i}: {json.dumps(prop, default=_np_default)}\n")
 
     # Strategy
     if strategy:

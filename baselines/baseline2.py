@@ -36,6 +36,17 @@ import time
 from pathlib import Path
 
 import numpy as np
+
+
+def _np_default(obj):
+    """numpy-aware default= for json.dumps. See agents/experiment_agent.py."""
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 import pandas as pd
 import torch
 from dotenv import load_dotenv
@@ -97,7 +108,7 @@ def _build_prompt(search_state, max_params, hospital, task, max_flops=None):
 
     # Search space
     parts.append("\n## Search Space\n")
-    parts.append(f"Available choices: {json.dumps(CHOICES)}\n")
+    parts.append(f"Available choices: {json.dumps(CHOICES, default=_np_default)}\n")
     parts.append(
         "Each architecture is defined by four scalar hyperparameters:\n"
         f"- embed_dim: one value from {CHOICES['embed_dim']}\n"
@@ -120,7 +131,7 @@ def _build_prompt(search_state, max_params, hospital, task, max_flops=None):
         parts.append(f"\n## Previously Evaluated Architectures ({len(completed)})\n")
         parts.append("All metrics below are on the VALIDATION set.\n\n")
         for i, exp in enumerate(completed):
-            parts.append(f"  [{i+1}] {json.dumps(exp)}\n")
+            parts.append(f"  [{i+1}] {json.dumps(exp, default=_np_default)}\n")
         parts.append(
             "\nLearn from these results. Avoid proposing an architecture that is "
             "identical to any above. Use the trend in val metrics to guide your next "
@@ -259,7 +270,7 @@ def _propose_one(search_state, max_params, client, model, hospital, task,
             print(f"  INVALID: {msg}")
             extra_feedback = (
                 f"\n\n## Previous Attempt Feedback\n"
-                f"Your previous proposal {json.dumps(prop)} was invalid: {msg}. "
+                f"Your previous proposal {json.dumps(prop, default=_np_default)} was invalid: {msg}. "
                 f"Please fix this issue.\n"
             )
             continue
@@ -269,7 +280,7 @@ def _propose_one(search_state, max_params, client, model, hospital, task,
             print(f"  DUPLICATE of an already-evaluated architecture")
             extra_feedback = (
                 f"\n\n## Previous Attempt Feedback\n"
-                f"Your previous proposal {json.dumps(prop)} is identical to an "
+                f"Your previous proposal {json.dumps(prop, default=_np_default)} is identical to an "
                 f"already-evaluated architecture. Propose a DIFFERENT architecture.\n"
             )
             continue
@@ -280,7 +291,7 @@ def _propose_one(search_state, max_params, client, model, hospital, task,
             print(f"  OVER BUDGET (params): {n_params:,} > {max_params:,}")
             extra_feedback = (
                 f"\n\n## Previous Attempt Feedback\n"
-                f"Your previous proposal {json.dumps(prop)} has {n_params:,} "
+                f"Your previous proposal {json.dumps(prop, default=_np_default)} has {n_params:,} "
                 f"parameters, which exceeds the budget of {max_params:,}. "
                 f"Propose a smaller architecture.\n"
             )
@@ -291,7 +302,7 @@ def _propose_one(search_state, max_params, client, model, hospital, task,
             print(f"  OVER BUDGET (FLOPs): {n_flops:,} > {max_flops:,}")
             extra_feedback = (
                 f"\n\n## Previous Attempt Feedback\n"
-                f"Your previous proposal {json.dumps(prop)} has {n_flops:,} "
+                f"Your previous proposal {json.dumps(prop, default=_np_default)} has {n_flops:,} "
                 f"FLOPs, which exceeds the budget of {max_flops:,}. "
                 f"Propose a smaller architecture.\n"
             )

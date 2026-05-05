@@ -55,6 +55,17 @@ import time
 from pathlib import Path
 
 import numpy as np
+
+
+def _np_default(obj):
+    """numpy-aware default= for json.dumps. See agents/experiment_agent.py."""
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 import pandas as pd
 import torch
 from dotenv import load_dotenv
@@ -231,7 +242,7 @@ def _build_mutation_prompt(parent_config, parent_metrics, directive,
         f"(hospital={hospital}, task={task}).\n\n",
         _format_search_space(),
         _format_budget(max_params, max_flops),
-        f"\n## Parent architecture\n{json.dumps(parent_config)}\n",
+        f"\n## Parent architecture\n{json.dumps(parent_config, default=_np_default)}\n",
     ]
     if parent_metrics:
         parts.append(
@@ -255,14 +266,14 @@ def _build_crossover_prompt(parent_a, parent_b, metrics_a, metrics_b,
         f"(hospital={hospital}, task={task}).\n\n",
         _format_search_space(),
         _format_budget(max_params, max_flops),
-        f"\n## Parent A\n{json.dumps(parent_a)}\n",
+        f"\n## Parent A\n{json.dumps(parent_a, default=_np_default)}\n",
     ]
     if metrics_a:
         parts.append(
             f"Parent A val metrics: auroc={metrics_a['auroc']:.4f}, "
             f"auprc={metrics_a['auprc']:.4f}\n"
         )
-    parts.append(f"\n## Parent B\n{json.dumps(parent_b)}\n")
+    parts.append(f"\n## Parent B\n{json.dumps(parent_b, default=_np_default)}\n")
     if metrics_b:
         parts.append(
             f"Parent B val metrics: auroc={metrics_b['auroc']:.4f}, "
@@ -358,7 +369,7 @@ def _generate_one(prompt, client, model, temperature, vocab_size, max_adm,
             print(f"  INVALID: {msg}")
             feedback = (
                 f"\n\n## Previous Attempt Feedback\n"
-                f"Previous proposal {json.dumps(prop)} was invalid: {msg}. Fix it.\n"
+                f"Previous proposal {json.dumps(prop, default=_np_default)} was invalid: {msg}. Fix it.\n"
             )
             continue
         key = (prop["embed_dim"], prop["depth"], prop["mlp_ratio"], prop["num_heads"])
@@ -366,7 +377,7 @@ def _generate_one(prompt, client, model, temperature, vocab_size, max_adm,
             print(f"  DUPLICATE: {prop} already evaluated")
             feedback = (
                 f"\n\n## Previous Attempt Feedback\n"
-                f"Previous proposal {json.dumps(prop)} is identical to an "
+                f"Previous proposal {json.dumps(prop, default=_np_default)} is identical to an "
                 f"already-evaluated architecture. Propose a DIFFERENT one.\n"
             )
             continue
@@ -376,7 +387,7 @@ def _generate_one(prompt, client, model, temperature, vocab_size, max_adm,
             print(f"  OVER PARAMS: {n_params:,} > {max_params:,}")
             feedback = (
                 f"\n\n## Previous Attempt Feedback\n"
-                f"Previous proposal {json.dumps(prop)} has {n_params:,} params, "
+                f"Previous proposal {json.dumps(prop, default=_np_default)} has {n_params:,} params, "
                 f"exceeds budget {max_params:,}. Propose smaller.\n"
             )
             continue
@@ -385,7 +396,7 @@ def _generate_one(prompt, client, model, temperature, vocab_size, max_adm,
             print(f"  OVER FLOPs: {n_flops:,} > {max_flops:,}")
             feedback = (
                 f"\n\n## Previous Attempt Feedback\n"
-                f"Previous proposal {json.dumps(prop)} has {n_flops:,} FLOPs, "
+                f"Previous proposal {json.dumps(prop, default=_np_default)} has {n_flops:,} FLOPs, "
                 f"exceeds budget {max_flops:,}. Propose smaller.\n"
             )
             continue

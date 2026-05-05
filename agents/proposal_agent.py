@@ -11,8 +11,22 @@ Uses Claude API to propose transformer architectures based on:
 import json
 import time
 
+import numpy as np
+
 from utils.tracer import get_tracer
 from utils.llm_counter import increment as _llm_increment
+
+
+def _np_default(obj):
+    """numpy-aware default= for json.dumps. See agents/experiment_agent.py."""
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
 
 CHOICES = {
     "mlp_ratio": [1, 2, 4, 8],
@@ -34,7 +48,7 @@ def _build_prompt(context, search_state, max_params, strategy=None, max_flops=No
 
     # Search space
     parts.append("## Search Space\n")
-    parts.append(f"Available choices: {json.dumps(CHOICES)}\n")
+    parts.append(f"Available choices: {json.dumps(CHOICES, default=_np_default)}\n")
     parts.append(
         "Each architecture is defined by four scalar hyperparameters:\n"
         f"- embed_dim: one value from {CHOICES['embed_dim']}\n"
@@ -73,7 +87,7 @@ def _build_prompt(context, search_state, max_params, strategy=None, max_flops=No
             f"task: {matched_task}\n\n"
         )
         for i, arch in enumerate(top_k):
-            parts.append(f"  Top-{i+1}: {json.dumps(arch)}\n")
+            parts.append(f"  Top-{i+1}: {json.dumps(arch, default=_np_default)}\n")
     else:
         parts.append(
             "\n## Historical Data\n"
@@ -102,7 +116,7 @@ def _build_prompt(context, search_state, max_params, strategy=None, max_flops=No
             "Performance shown below is on the VALIDATION set.\n\n"
         )
         for exp in completed:
-            parts.append(f"  {json.dumps(exp)}\n")
+            parts.append(f"  {json.dumps(exp, default=_np_default)}\n")
         parts.append(
             "\nAvoid proposing architectures that are identical or very similar "
             "to already-tried ones. Learn from what worked and what didn't.\n"
@@ -282,7 +296,7 @@ def _build_revision_prompt(context, search_state, rejected_with_critiques, max_p
 
     # Search space
     parts.append(f"\n## Search Space\n")
-    parts.append(f"Available choices: {json.dumps(CHOICES)}\n")
+    parts.append(f"Available choices: {json.dumps(CHOICES, default=_np_default)}\n")
     parts.append(
         "All four values (embed_dim, depth, mlp_ratio, num_heads) are scalars.\n"
         "CONSTRAINT: embed_dim must be divisible by num_heads.\n"
@@ -303,13 +317,13 @@ def _build_revision_prompt(context, search_state, rejected_with_critiques, max_p
     if completed:
         parts.append(f"\n## Already Tried ({len(completed)} architectures)\n")
         for exp in completed:
-            parts.append(f"  {json.dumps(exp)}\n")
+            parts.append(f"  {json.dumps(exp, default=_np_default)}\n")
 
     # Rejected proposals + critiques
     parts.append(f"\n## Rejected Proposals & Critique Reasons\n")
     for i, item in enumerate(rejected_with_critiques):
         parts.append(f"\n### Rejected Proposal {i+1}\n")
-        parts.append(f"  Config: {json.dumps(item['proposal'])}\n")
+        parts.append(f"  Config: {json.dumps(item['proposal'], default=_np_default)}\n")
         parts.append(f"  Critique: {item['critique']}\n")
         parts.append(f"  Risk tags: {item['risk_tags']}\n")
 

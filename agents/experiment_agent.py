@@ -15,6 +15,19 @@ import numpy as np
 import torch
 from torch.optim import AdamW
 
+
+def _np_default(obj):
+    """numpy-aware default= for json.dumps. Converts np.int64/np.float64 etc.
+    Search-state dicts contain numpy scalars from count_subnet_params /
+    count_subnet_flops / metric aggregation, so plain json.dumps crashes."""
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -251,7 +264,7 @@ def _build_strategy_prompt(context, search_state):
     if top_k:
         parts.append("\n## Historical Best Architectures (from similar hospital)\n")
         for i, arch in enumerate(top_k):
-            parts.append(f"  Top-{i+1}: {json.dumps(arch)}\n")
+            parts.append(f"  Top-{i+1}: {json.dumps(arch, default=_np_default)}\n")
 
     # SHAP importance
     shap = context.get("shap_importance", {})
@@ -266,7 +279,7 @@ def _build_strategy_prompt(context, search_state):
     if completed:
         parts.append(f"\n## Completed Experiments ({len(completed)} architectures)\n")
         for exp in completed:
-            parts.append(f"  {json.dumps(exp)}\n")
+            parts.append(f"  {json.dumps(exp, default=_np_default)}\n")
 
     # Budget
     budget = search_state.get("budget_remaining", 0)
