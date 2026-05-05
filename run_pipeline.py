@@ -400,6 +400,32 @@ def _label_entropy_for_task(train_data, task):
     return float(np.mean(ents))
 
 
+def _label_positive_ratio_for_task(train_data, task):
+    """Mean positive-class ratio. For binary tasks: P(y=1). For multilabel: mean
+    of per-class P(y_c=1) — i.e. fraction of (sample, class) pairs that are
+    positive. Used as a label-balance feature alongside `label_entropy` for the
+    task-similarity fallback in mas_search."""
+    info = task_info(task)
+    if info["type"] == "binary":
+        if task == "death":
+            y = train_data["DEATH"].astype(float).values
+        elif task == "stay":
+            y = (train_data["STAY_DAYS"] > 7).astype(float).values
+        elif task == "readmission":
+            y = train_data["READMISSION_3M"].astype(float).values
+        else:
+            raise ValueError(f"binary task '{task}' has no label rule registered")
+        return float(np.mean(y))
+
+    # Multilabel: mean positive ratio across all (sample, class) pairs.
+    label_col = info["label_col"]
+    sub = train_data[train_data[info["filter_col"]].notna()]
+    if len(sub) == 0:
+        return 0.0
+    arr = np.array([list(v) for v in sub[label_col].values], dtype=int)  # [N, C]
+    return float(arr.mean())
+
+
 def _load_task_split(args, task):
     """Resolve the right (train, val, test) pkl for a task. For binary tasks
     they all share mimic_downstream.pkl; multilabel tasks each have their own
@@ -484,10 +510,11 @@ def finetune_and_evaluate(args, tokenizer, ckpt_path, device):
         # Load the right split for this task.
         train_data, val_data, test_data = _load_task_split(args, task)
 
-        # Compute label entropy for this task.
+        # Compute label entropy + positive-class ratio for this task.
         label_entropy = _label_entropy_for_task(train_data, task)
-        print(f"  Label entropy: {label_entropy:.4f}  ({task_type}, "
-              f"{num_classes} classes)")
+        positive_ratio = _label_positive_ratio_for_task(train_data, task)
+        print(f"  Label entropy: {label_entropy:.4f}  positive_ratio: {positive_ratio:.4f}"
+              f"  ({task_type}, {num_classes} classes)")
 
         train_dataset = FineTuneEHRDataset(train_data, tokenizer, token_type, max_adm, task)
         val_dataset = FineTuneEHRDataset(val_data, tokenizer, token_type, max_adm, task)
@@ -605,6 +632,7 @@ def finetune_and_evaluate(args, tokenizer, ckpt_path, device):
                 "auroc": avg_test["auroc"],
                 "auprc": avg_test["auprc"],
                 "label_entropy": label_entropy,
+                "positive_ratio": positive_ratio,
             }
 
             all_results.append(row)

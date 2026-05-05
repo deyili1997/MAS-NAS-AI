@@ -41,10 +41,13 @@ from utils.seed import set_random_seed
 from utils.dataset import FineTuneEHRDataset, batcher
 from utils.engine import evaluate
 from utils.device_helpers import dataloader_kwargs, pick_device
-from utils.task_registry import task_info, ALL_TASKS
+from utils.task_registry import task_info, task_time_horizon, ALL_TASKS
 from utils.paths import get_processed_root
 from utils.llm_counter import increment as _llm_increment, reset as _llm_reset, get as _llm_get
-from run_pipeline import build_tokenizer, pretrain
+from run_pipeline import (
+    build_tokenizer, pretrain,
+    _label_entropy_for_task, _label_positive_ratio_for_task,
+)
 from model.supernet_transformer import TransformerSuper
 from dataset_summary import summarize_dataset
 
@@ -68,6 +71,86 @@ SUMMARY_FEATURE_COLS = [
     "Finetune_avg_diag_per_patient", "Finetune_avg_med_per_patient",
     "Finetune_avg_lab_per_patient", "Finetune_avg_pro_per_patient",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Task-similarity features (used when target task is missing from source hospital)
+# ---------------------------------------------------------------------------
+
+# Normalization constants — keep all dims in roughly comparable range so cosine
+# similarity reflects feature alignment instead of being dominated by one axis.
+_TASK_NUMCLASSES_LOG_NORM = np.log(20.0)   # log(20) ≈ 3.0; max num_classes ~18
+_TASK_HORIZON_NORM = 365.0                  # 1 year as upper anchor
+
+# Order of components in task_feature_vector(); used for tracer / logs.
+TASK_FEATURE_COLS = [
+    "is_binary", "is_multilabel",
+    "num_classes_log_norm",
+    "label_entropy",
+    "positive_ratio",
+    "time_horizon_norm",
+]
+
+
+def task_feature_vector(task: str, label_entropy: float, positive_ratio: float) -> np.ndarray:
+    """6-D feature vector describing a task's prediction setup + label statistics.
+
+    Components (matching `TASK_FEATURE_COLS` order):
+      0 is_binary            ∈ {0, 1}
+      1 is_multilabel        ∈ {0, 1}
+      2 num_classes_log_norm log(num_classes)/log(20), ~0.23 (binary) … ~0.96 (18-pheno)
+      3 label_entropy        passed in (binary entropy or mean per-label binary entropy)
+      4 positive_ratio       passed in (binary P(y=1) or mean per-(sample,class) P=1)
+      5 time_horizon_norm    days/365 (0 in-stay, ~0.25 readmission-3M, 0.5/1 pheno)
+
+    Static dims (0,1,2,5) come from `task_info(task)`; dynamic dims (3,4) come
+    from data and are passed in by caller.
+    """
+    info = task_info(task)
+    is_binary = (info["type"] == "binary")
+    return np.array([
+        1.0 if is_binary else 0.0,
+        0.0 if is_binary else 1.0,
+        float(np.log(max(info["num_classes"], 2)) / _TASK_NUMCLASSES_LOG_NORM),
+        float(label_entropy),
+        float(positive_ratio),
+        float(task_time_horizon(task)) / _TASK_HORIZON_NORM,
+    ], dtype=float)
+
+
+def _compute_target_task_label_stats(hospital: str, task: str) -> tuple:
+    """Load the train split for (hospital, task) and compute (label_entropy,
+    positive_ratio). Mirrors run_pipeline._load_task_split + the two label
+    helpers, but standalone (no `args` needed)."""
+    info = task_info(task)
+    pkl_path = get_processed_root(hospital) / info["data_pkl"]
+    with open(pkl_path, "rb") as f:
+        train_data, _, _ = pickle.load(f)
+    return (
+        _label_entropy_for_task(train_data, task),
+        _label_positive_ratio_for_task(train_data, task),
+    )
+
+
+def _source_task_feature_vector(source_task: str, hosp_df: pd.DataFrame) -> np.ndarray | None:
+    """Build feature vector for a source task using metadata aggregates.
+
+    Pulls `label_entropy` and (if present) `positive_ratio` from `hosp_df`
+    rows for `source_task`. Falls back gracefully when older metadata.csv
+    files lack `positive_ratio` (assumes 0.5 — neutral imbalance prior).
+    Returns None if the source task is not registered (unknown semantics)."""
+    if source_task not in ALL_TASKS:
+        # Unregistered task — we can't trust task_type / num_classes / horizon.
+        return None
+    sub = hosp_df[hosp_df["task"] == source_task]
+    if sub.empty:
+        return None
+    label_entropy = float(sub["label_entropy"].median())
+    if "positive_ratio" in sub.columns and sub["positive_ratio"].notna().any():
+        positive_ratio = float(sub["positive_ratio"].median())
+    else:
+        positive_ratio = 0.5   # backward-compat: no info → neutral
+    return task_feature_vector(source_task, label_entropy, positive_ratio)
 
 
 def _compute_target_summary(hospital):
@@ -122,37 +205,70 @@ def _context_compute_avg_rank(group):
     return ranks.mean(axis=1).values
 
 
-def _get_top_k_archs(metadata_df, hospital, task, max_params, top_k):
-    """Get top-k architectures from the most similar hospital."""
+def _get_top_k_archs(metadata_df, hospital, task, max_params, top_k,
+                     target_task_features=None):
+    """Get top-k architectures from the most similar hospital.
+
+    Match logic:
+      1. If `task` has metadata rows in `hospital`           → use exact task.
+      2. Else fallback via cosine similarity on `task_feature_vector` between
+         target task and each source task available in `hospital`. Picks the
+         source task with highest similarity. Requires `target_task_features`
+         to be passed in (computed once in gather_historical_context).
+      3. If `target_task_features` is None (e.g. caller skipped it), degrade
+         to the legacy "first available task" fallback so we never crash.
+    """
     hosp_df = metadata_df[metadata_df["hospital"] == hospital].copy()
     if hosp_df.empty:
-        return [], task
+        return [], task, None
 
     task_df = hosp_df[hosp_df["task"] == task]
     matched_task = task
+    matched_similarity: float | None = None   # None for exact match
 
     if task_df.empty:
-        available_tasks = hosp_df["task"].unique()
+        available_tasks = list(hosp_df["task"].unique())
         if len(available_tasks) == 0:
-            return [], task
+            return [], task, None
 
-        task_entropies = hosp_df.groupby("task")["label_entropy"].median()
-        target_entropy = 0.5
-        if "label_entropy" in hosp_df.columns:
-            diffs = (task_entropies - target_entropy).abs()
-            matched_task = diffs.idxmin()
+        # ---- Multi-feature task similarity (Plan A) ----
+        if target_task_features is not None:
+            sims = []
+            for src_task in available_tasks:
+                src_vec = _source_task_feature_vector(src_task, hosp_df)
+                if src_vec is None:
+                    continue
+                cs = float(cosine_similarity(
+                    target_task_features.reshape(1, -1),
+                    src_vec.reshape(1, -1),
+                )[0, 0])
+                sims.append((src_task, cs))
+
+            if sims:
+                sims.sort(key=lambda x: x[1], reverse=True)
+                matched_task, matched_similarity = sims[0]
+                # Pretty-print all candidates for transparency
+                ranked_str = ", ".join(f"{t}={s:.3f}" for t, s in sims)
+                print(f"  [Context] Task '{task}' not found for {hospital}; "
+                      f"fallback by feature-cosine → '{matched_task}' (sim={matched_similarity:.3f}). "
+                      f"Candidates: {ranked_str}")
+            else:
+                # No registered candidate task to compare → first available
+                matched_task = available_tasks[0]
+                print(f"  [Context] Task '{task}' not found for {hospital}; "
+                      f"no registered fallback candidates, using '{matched_task}'")
         else:
             matched_task = available_tasks[0]
+            print(f"  [Context] Task '{task}' not found for {hospital}; "
+                  f"no target-task features supplied, using '{matched_task}'")
 
         task_df = hosp_df[hosp_df["task"] == matched_task]
-        print(f"  [Context] Task '{task}' not found for {hospital}, "
-              f"falling back to '{matched_task}'")
 
     if "num_params" in task_df.columns:
         task_df = task_df[task_df["num_params"] <= max_params]
 
     if task_df.empty:
-        return [], matched_task
+        return [], matched_task, matched_similarity
 
     task_df = task_df.reset_index(drop=True)
     task_df["avg_rank"] = _context_compute_avg_rank(task_df)
@@ -173,7 +289,7 @@ def _get_top_k_archs(metadata_df, hospital, task, max_params, top_k):
         }
         archs.append(arch)
 
-    return archs, matched_task
+    return archs, matched_task, matched_similarity
 
 
 def _load_shap_importance(results_dir, hospital, task):
@@ -192,13 +308,27 @@ def gather_historical_context(hospital, task, max_params, results_dir, top_k):
     Gather historical context for the target hospital and task.
 
     Returns dict with target_summary, similar_hospital, similarity_score,
-    matched_task, top_k_archs, shap_importance.
+    matched_task, matched_task_similarity, top_k_archs, shap_importance.
+    `matched_task_similarity` is None for exact task match, else the cosine
+    similarity (in 6-D task feature space) between target and matched source
+    task — useful for downstream agents to calibrate trust in the prior.
     """
     print("\n[Historical Context]")
 
     print(f"  Computing dataset summary for {hospital}...")
     target_summary = _compute_target_summary(hospital)
     print(f"  Target summary: {target_summary}")
+
+    # Compute target task feature vector (Plan A: multi-feature task similarity)
+    try:
+        tgt_entropy, tgt_pos_ratio = _compute_target_task_label_stats(hospital, task)
+        target_task_features = task_feature_vector(task, tgt_entropy, tgt_pos_ratio)
+        print(f"  Target task features [{','.join(TASK_FEATURE_COLS)}] = "
+              f"{np.round(target_task_features, 4).tolist()}")
+    except Exception as e:
+        print(f"  ⚠ Could not compute target task features ({e}); "
+              f"task-similarity fallback will degrade.")
+        target_task_features = None
 
     historical_df = _load_historical_summaries(results_dir)
 
@@ -209,6 +339,7 @@ def gather_historical_context(hospital, task, max_params, results_dir, top_k):
             "similar_hospital": None,
             "similarity_score": 0.0,
             "matched_task": task,
+            "matched_task_similarity": None,
             "top_k_archs": [],
             "shap_importance": {},
         }
@@ -222,6 +353,7 @@ def gather_historical_context(hospital, task, max_params, results_dir, top_k):
             "similar_hospital": None,
             "similarity_score": 0.0,
             "matched_task": task,
+            "matched_task_similarity": None,
             "top_k_archs": [],
             "shap_importance": {},
         }
@@ -233,10 +365,15 @@ def gather_historical_context(hospital, task, max_params, results_dir, top_k):
     else:
         metadata_df = pd.DataFrame()
 
-    top_k_archs, matched_task = _get_top_k_archs(
-        metadata_df, similar_hospital, task, max_params, top_k
+    top_k_archs, matched_task, matched_task_similarity = _get_top_k_archs(
+        metadata_df, similar_hospital, task, max_params, top_k,
+        target_task_features=target_task_features,
     )
-    print(f"  Retrieved {len(top_k_archs)} top architectures from {similar_hospital}/{matched_task}")
+    if matched_task_similarity is None:
+        match_str = f"{similar_hospital}/{matched_task} (exact match)"
+    else:
+        match_str = f"{similar_hospital}/{matched_task} (task-feature sim={matched_task_similarity:.4f})"
+    print(f"  Retrieved {len(top_k_archs)} top architectures from {match_str}")
 
     shap_importance = _load_shap_importance(results_dir, similar_hospital, matched_task)
     if shap_importance:
@@ -249,6 +386,7 @@ def gather_historical_context(hospital, task, max_params, results_dir, top_k):
         "similar_hospital": similar_hospital,
         "similarity_score": sim_score,
         "matched_task": matched_task,
+        "matched_task_similarity": matched_task_similarity,
         "top_k_archs": top_k_archs,
         "shap_importance": shap_importance,
     }
