@@ -42,8 +42,20 @@ from statsmodels.stats.multitest import multipletests
 # ---------------------------------------------------------------------------
 # Display labels (paper-friendly)
 # ---------------------------------------------------------------------------
-METHODS = ["baseline0", "baseline1", "baseline2", "baseline3", "baseline4",
-           "mas", "mas_loto", "mas_cold"]
+# Tables 1, S1, S2, S3, cost — paper main comparison: 5 baselines + MAS-NAS only.
+# Ablation methods (mas_loto, mas_cold) are EXCLUDED from these to avoid:
+#   - inflating Table 1 to 8 rows
+#   - polluting Wilcoxon (would compare MAS vs mas_loto/mas_cold as if "baselines")
+#   - skewing arch/cost audits
+MAIN_METHODS = ["baseline0", "baseline1", "baseline2", "baseline3", "baseline4", "mas"]
+
+# Fig 5 robustness ablation only — these methods are extra MAS variants, not baselines.
+# Used exclusively by build_loto_ablation_table().
+ABLATION_METHODS = ["mas_loto", "mas_cold"]
+
+# Union — used by collect_results() to load every run on disk.
+METHODS = MAIN_METHODS + ABLATION_METHODS
+
 METHOD_DISPLAY = {
     "baseline0": "Random",
     "baseline1": "EA",
@@ -152,7 +164,7 @@ def build_main_table(records: dict, output_path: Path) -> pd.DataFrame:
     """Best test AUPRC per (method, task), mean ± std over seeds. The cell
     values match Table 1 of the paper. Bold-the-max in LaTeX downstream."""
     rows = []
-    for method in METHODS:
+    for method in MAIN_METHODS:
         for task in TASKS:
             seeds = get_seeds(records, method, task)
             scores = [records[(method, task, s)]["best"].get("test_auprc") for s in seeds]
@@ -183,7 +195,7 @@ def build_main_table(records: dict, output_path: Path) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 def build_supp_table(records: dict, output_path: Path) -> pd.DataFrame:
     rows = []
-    for method in METHODS:
+    for method in MAIN_METHODS:
         for task in TASKS:
             seeds = get_seeds(records, method, task)
             for metric in METRICS:
@@ -211,7 +223,7 @@ def build_arch_table(records: dict, output_path: Path) -> pd.DataFrame:
     """Verifies all methods picked architectures within --max_params constraint.
     Reports mean params / FLOPs of the chosen architecture per (method, task)."""
     rows = []
-    for method in METHODS:
+    for method in MAIN_METHODS:
         for task in TASKS:
             seeds = get_seeds(records, method, task)
             params = [records[(method, task, s)]["best"].get("num_params") for s in seeds]
@@ -241,7 +253,7 @@ def build_arch_table(records: dict, output_path: Path) -> pd.DataFrame:
 def build_cost_table(records: dict, output_path: Path) -> pd.DataFrame:
     """Per-method total compute cost averaged across (task × seed) runs."""
     rows = []
-    for method in METHODS:
+    for method in MAIN_METHODS:
         wall_clocks: list = []
         llm_calls: list = []
         for task in TASKS:
@@ -297,7 +309,7 @@ def build_efficiency_table(
     achieves its win with a smaller/cheaper architecture vs baselines@100.
     """
     rows = []
-    for method in METHODS:
+    for method in MAIN_METHODS:
         cutoff = mas_budget if method == "mas" else baseline_budget
         for task in TASKS:
             seeds = get_seeds(records, method, task)
@@ -501,7 +513,7 @@ def build_significance_table(records: dict, output_path: Path) -> pd.DataFrame:
 
             # Collect per-baseline comparisons for this (task, metric)
             comparisons = []
-            for baseline in [m for m in METHODS if m != "mas"]:
+            for baseline in [m for m in MAIN_METHODS if m != "mas"]:
                 bl_seeds = set(get_seeds(records, baseline, task))
                 paired = []
                 for s in mas_seeds:

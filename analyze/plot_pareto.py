@@ -219,8 +219,9 @@ def main():
         plot_pareto_panel(ax, records, task)
 
     fig.suptitle(
-        f"Pareto front (params vs val AUPRC) — {args.hospital}",
-        fontsize=13, y=1.02,
+        f"Pareto front: # parameters vs validation AUPRC (per evaluated arch) — {args.hospital}\n"
+        f"Note: AUPRC here is from search-time validation, not test (only the chosen arch is test-evaluated).",
+        fontsize=11, y=1.04,
     )
     plt.tight_layout()
 

@@ -303,11 +303,16 @@ def _load_shap_importance(results_dir, hospital, task):
     return {str(k): float(v) for k, v in zip(df.index, df.iloc[:, 0])}
 
 
-def gather_historical_context(hospital, task, max_params, results_dir, top_k,
+def gather_historical_context(hospital, task, max_params, history_root, top_k,
                               exclude_exact_task_from_history=False,
                               no_history=False):
     """
     Gather historical context for the target hospital and task.
+
+    Reads from `history_root` (hospital-level INPUT root):
+      - <history_root>/<*>/dataset_summary.csv   (similar-hospital matching)
+      - <history_root>/<*>/metadata.csv          (top-k arch retrieval)
+      - <history_root>/shap_analysis/<...>/      (SHAP importance)
 
     Returns dict with target_summary, similar_hospital, similarity_score,
     matched_task, matched_task_similarity, top_k_archs, shap_importance.
@@ -352,7 +357,7 @@ def gather_historical_context(hospital, task, max_params, results_dir, top_k,
               f"task-similarity fallback will degrade.")
         target_task_features = None
 
-    historical_df = _load_historical_summaries(results_dir)
+    historical_df = _load_historical_summaries(history_root)
 
     if historical_df.empty:
         print("  No historical data found — starting cold (no prior experiments)")
@@ -380,7 +385,7 @@ def gather_historical_context(hospital, task, max_params, results_dir, top_k,
             "shap_importance": {},
         }
 
-    metadata_pattern = os.path.join(results_dir, "*", "metadata.csv")
+    metadata_pattern = os.path.join(history_root, "*", "metadata.csv")
     metadata_files = sorted(glob.glob(metadata_pattern))
     if metadata_files:
         metadata_df = pd.concat([pd.read_csv(f) for f in metadata_files], ignore_index=True)
@@ -411,7 +416,7 @@ def gather_historical_context(hospital, task, max_params, results_dir, top_k,
         match_str = f"{similar_hospital}/{matched_task} (task-feature sim={matched_task_similarity:.4f})"
     print(f"  Retrieved {len(top_k_archs)} top architectures from {match_str}")
 
-    shap_importance = _load_shap_importance(results_dir, similar_hospital, matched_task)
+    shap_importance = _load_shap_importance(history_root, similar_hospital, matched_task)
     if shap_importance:
         print(f"  SHAP importance: {shap_importance}")
     else:
@@ -455,7 +460,14 @@ def parse_args():
     p.add_argument("--top_k", type=int, default=5,
                    help="Number of historical best architectures to retrieve")
     p.add_argument("--results_dir", type=str, default="./results",
-                   help="Directory with past experiment results")
+                   help="OUTPUT root for this run (search/<method>/<task>/ outputs + "
+                        "<hospital>/checkpoint_mlm/ for pretrain). For seeded runs, "
+                        "set this to ./results/seed_<N> so seeds don't collide.")
+    p.add_argument("--history_root", type=str, default=None,
+                   help="Hospital-level INPUT root for past experiments — where "
+                        "<hospital>/metadata.csv, <hospital>/dataset_summary.csv, "
+                        "shap_analysis/ live (always seed-independent). If unset, "
+                        "defaults to --results_dir (backward-compatible single-seed mode).")
 
     # Robustness ablation flags (Fig 5)
     p.add_argument("--exclude_exact_task_from_history", action="store_true",
@@ -541,6 +553,12 @@ def _method_name(args) -> str:
 
 def main():
     args = parse_args()
+    # Default --history_root to --results_dir if not specified (single-seed legacy mode).
+    # In production multi-seed runs, sbatch should pass --results_dir ./results/seed_<N>
+    # AND --history_root ./results so per-seed outputs don't collide while hospital-level
+    # inputs (metadata.csv, shap_analysis/, checkpoint_mlm/) stay shared.
+    if args.history_root is None:
+        args.history_root = args.results_dir
     t_start = time.perf_counter()
     _llm_reset()
     set_random_seed(args.seed, deterministic=not args.cudnn_benchmark)
@@ -549,6 +567,7 @@ def main():
     print(f"Device: {device}")
     print(f"Target: {args.hospital} / {args.task}  (method={method_name})")
     print(f"Budget: {args.budget} architectures, max_params={args.max_params:,}")
+    print(f"Output root: {args.results_dir}   |   History root: {args.history_root}")
 
     # --- Initialize I/O tracer ---
     # Output layout: results/<hospital>/search/<method>/<task>/{<method>_search.csv, <method>_best.csv, agent_io_log.txt}
@@ -590,8 +609,11 @@ def main():
     else:
         print("\nNo checkpoint provided — running pretrain phase first...")
         pretrain_data = pickle.load(open(pretrain_data_path, "rb"))
-        # pretrain() expects args.output_dir
-        args.output_dir = args.results_dir
+        # pretrain() writes <output_dir>/<hospital>/checkpoint_mlm/mlm_model.pt.
+        # Use history_root (hospital-level) NOT results_dir (per-seed) so the
+        # mlm checkpoint is shared across seeds — otherwise every seed re-runs
+        # 50 epochs of pretrain (~100+ wasted GPU-hours across 25 mas seeds).
+        args.output_dir = args.history_root
         ckpt_path = pretrain(args, tokenizer, pretrain_data, max_adm, device)
 
     # weights_only=True: see run_pipeline.py:~314 for ckpt schema (all metadata
@@ -629,7 +651,7 @@ def main():
         hospital=args.hospital,
         task=args.task,
         max_params=args.max_params,
-        results_dir=args.results_dir,
+        history_root=args.history_root,
         top_k=args.top_k,
         exclude_exact_task_from_history=args.exclude_exact_task_from_history,
         no_history=args.no_history,
@@ -931,7 +953,7 @@ def main():
 
     # Run-level metadata for cost / fairness audit
     meta = {
-        "method": "mas",
+        "method": method_name,        # mas / mas_loto / mas_cold (from _method_name(args))
         "hospital": args.hospital,
         "task": args.task,
         "seed": int(args.seed),
