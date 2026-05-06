@@ -1,0 +1,57 @@
+{
+  "task": "stay",
+  "feature_importance_order": [
+    "embed_dim",
+    "num_heads",
+    "depth",
+    "mlp_ratio"
+  ],
+  "preferred_levels": {
+    "embed_dim": [
+      32,
+      64,
+      128
+    ],
+    "depth": [
+      1,
+      4
+    ],
+    "mlp_ratio": [
+      2
+    ],
+    "num_heads": [
+      8
+    ]
+  },
+  "discouraged_levels": {
+    "embed_dim": [
+      16
+    ],
+    "depth": [
+      8
+    ],
+    "mlp_ratio": [
+      8
+    ],
+    "num_heads": [
+      1
+    ]
+  },
+  "interaction_rules": [
+    {
+      "pair": [
+        "embed_dim",
+        "num_heads"
+      ],
+      "preferred_combinations": [],
+      "avoid_combinations": []
+    }
+  ],
+  "confidence": {
+    "embed_dim": "high",
+    "depth": "moderate",
+    "mlp_ratio": "moderate",
+    "num_heads": "high"
+  },
+  "_caveat": "These levels are statistical regularities derived from XGBoost surrogate SHAP values pooled across multiple hospitals (mixed-effect models with hospital random intercept). They reflect cross-hospital stability, NOT causal architectural rules. Treat as soft directional guidance for LLM agent decisions: high-confidence preferred \u2192 strong push, discouraged \u2192 require explicit justification before adoption (NOT auto-rejection)."
+}

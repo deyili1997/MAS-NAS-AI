@@ -43,15 +43,19 @@ from statsmodels.stats.multitest import multipletests
 # Display labels (paper-friendly)
 # ---------------------------------------------------------------------------
 # Tables 1, S1, S2, S3, cost — paper main comparison: 5 baselines + MAS-NAS only.
-# Ablation methods (mas_loto, mas_cold) are EXCLUDED from these to avoid:
-#   - inflating Table 1 to 8 rows
-#   - polluting Wilcoxon (would compare MAS vs mas_loto/mas_cold as if "baselines")
+# Ablation methods (mas_loto, mas_layer1_only, mas_cold) are EXCLUDED from these to avoid:
+#   - inflating Table 1 with extra rows
+#   - polluting Wilcoxon (would compare MAS vs ablations as if "baselines")
 #   - skewing arch/cost audits
 MAIN_METHODS = ["baseline0", "baseline1", "baseline2", "baseline3", "baseline4", "mas"]
 
 # Fig 5 robustness ablation only — these methods are extra MAS variants, not baselines.
-# Used exclusively by build_loto_ablation_table().
-ABLATION_METHODS = ["mas_loto", "mas_cold"]
+# Used exclusively by build_loto_ablation_table(). Layer factorial design:
+#   mas              — Layer 1 (exact) ON, Layer 2 ON   (full method, in MAIN_METHODS)
+#   mas_layer1_only  — Layer 1 (exact) ON, Layer 2 OFF  (isolates Layer 2 contribution)
+#   mas_loto         — Layer 1 (fallback) ON, Layer 2 ON (Layer 1 robustness when exact missing)
+#   mas_cold         — Layer 1 OFF, Layer 2 OFF        (no prior; multi-agent reasoning only)
+ABLATION_METHODS = ["mas_layer1_only", "mas_loto", "mas_cold"]
 
 # Union — used by collect_results() to load every run on disk.
 METHODS = MAIN_METHODS + ABLATION_METHODS
@@ -62,9 +66,10 @@ METHOD_DISPLAY = {
     "baseline2": "LLM-1shot",
     "baseline3": "LLMatic",
     "baseline4": "CoLLM-NAS",
-    "mas":      "MAS-NAS",
-    "mas_loto": "MAS-NAS (LOTO)",
-    "mas_cold": "MAS-NAS (cold)",
+    "mas":             "MAS-NAS",
+    "mas_layer1_only": "MAS-NAS (L1-only)",
+    "mas_loto":        "MAS-NAS (LOTO)",
+    "mas_cold":        "MAS-NAS (cold)",
 }
 
 # Methods that compete with MAS as upper-bound LLM-based baselines.
@@ -422,20 +427,20 @@ def build_efficiency_table(
 # LOTO + Cold-start robustness ablation — Fig 5 companion table ★
 # ---------------------------------------------------------------------------
 def build_loto_ablation_table(records: dict, output_path: Path) -> pd.DataFrame:
-    """Per-task comparison of {MAS-exact, MAS-LOTO, MAS-cold, best-LLM-baseline}.
+    """Per-task 4-condition factorial: {MAS-exact, MAS-Layer1-only, MAS-LOTO, MAS-cold} vs best-LLM-baseline.
 
     For each task: aggregates test_auprc mean ± std across seeds, picks the
     best LLM-based baseline (LLMatic or CoLLM-NAS) to compete against, and
-    reports four delta columns to support Fig 5's paper claims:
+    reports delta columns to support Fig 5's paper claims:
 
-      delta_loto_vs_exact      ≈ -0.5 ~ -1%   (graceful fallback)
-      delta_cold_vs_exact      typically lower (no prior at all)
-      delta_loto_vs_baseline   ≥ 0  ★ punchline: even LOTO beats baseline
-      delta_cold_vs_baseline   ≥ 0  multi-agent value beyond the prior
+      delta_layer1_only_vs_exact  ★ isolates Layer 2's incremental contribution
+      delta_loto_vs_exact         ≈ -0.5 ~ -1%   (Layer 1 graceful fallback)
+      delta_cold_vs_exact         typically lower (no prior at all)
+      delta_*_vs_baseline         ≥ 0 means MAS variant still beats best baseline
 
     Reads the same `records` dict produced by `collect_results`, so it
-    requires the 5 methods (mas, mas_loto, mas_cold, baseline3, baseline4)
-    to all have *_best.csv files at expected paths.
+    requires the 6 methods (mas, mas_layer1_only, mas_loto, mas_cold,
+    baseline3, baseline4) to all have *_best.csv files at expected paths.
     """
     rows = []
     for task in TASKS:
@@ -452,8 +457,13 @@ def build_loto_ablation_table(records: dict, output_path: Path) -> pd.DataFrame:
             std_pct = float(np.std(scores, ddof=1)) * 100 if len(scores) > 1 else 0.0
             return round(mean_pct, 2), round(std_pct, 2), len(scores)
 
-        # Three MAS conditions
-        for cond, key in [("exact", "mas"), ("loto", "mas_loto"), ("cold", "mas_cold")]:
+        # Four MAS conditions (column key  →  records method key)
+        for cond, key in [
+            ("exact", "mas"),
+            ("layer1_only", "mas_layer1_only"),
+            ("loto", "mas_loto"),
+            ("cold", "mas_cold"),
+        ]:
             mean, std, n = _stats(key)
             row[f"mas_{cond}_mean_pct"] = mean
             row[f"mas_{cond}_std_pct"] = std
@@ -483,10 +493,12 @@ def build_loto_ablation_table(records: dict, output_path: Path) -> pd.DataFrame:
                 return None
             return round(a - b_val, 2)
 
-        row["delta_loto_vs_exact"]    = _delta("mas_loto_mean_pct", row["mas_exact_mean_pct"])
-        row["delta_cold_vs_exact"]    = _delta("mas_cold_mean_pct", row["mas_exact_mean_pct"])
-        row["delta_loto_vs_baseline"] = _delta("mas_loto_mean_pct", row["best_baseline_mean_pct"])
-        row["delta_cold_vs_baseline"] = _delta("mas_cold_mean_pct", row["best_baseline_mean_pct"])
+        row["delta_layer1_only_vs_exact"]    = _delta("mas_layer1_only_mean_pct", row["mas_exact_mean_pct"])
+        row["delta_loto_vs_exact"]           = _delta("mas_loto_mean_pct",        row["mas_exact_mean_pct"])
+        row["delta_cold_vs_exact"]           = _delta("mas_cold_mean_pct",        row["mas_exact_mean_pct"])
+        row["delta_layer1_only_vs_baseline"] = _delta("mas_layer1_only_mean_pct", row["best_baseline_mean_pct"])
+        row["delta_loto_vs_baseline"]        = _delta("mas_loto_mean_pct",        row["best_baseline_mean_pct"])
+        row["delta_cold_vs_baseline"]        = _delta("mas_cold_mean_pct",        row["best_baseline_mean_pct"])
 
         rows.append(row)
 
@@ -637,14 +649,16 @@ def main():
         print("  Sample rows:")
         print(df_sig.head(10).to_string(index=False))
 
-    print("\n[7/7] LOTO ablation table — MAS-exact vs MAS-LOTO vs MAS-cold vs best-baseline")
+    print("\n[7/7] Layer ablation table — MAS-exact vs L1-only vs LOTO vs cold vs best-baseline")
     df_loto = build_loto_ablation_table(records, out_dir / "loto_ablation_table.csv")
     if len(df_loto) > 0:
         cols_to_show = [
             "task",
-            "mas_exact_mean_pct", "mas_loto_mean_pct", "mas_cold_mean_pct",
+            "mas_exact_mean_pct", "mas_layer1_only_mean_pct",
+            "mas_loto_mean_pct", "mas_cold_mean_pct",
             "best_baseline_method", "best_baseline_mean_pct",
-            "delta_loto_vs_exact", "delta_loto_vs_baseline",
+            "delta_layer1_only_vs_exact",   # ★ Layer 2's incremental contribution
+            "delta_loto_vs_exact",
         ]
         cols_to_show = [c for c in cols_to_show if c in df_loto.columns]
         print(df_loto[cols_to_show].to_string(index=False))

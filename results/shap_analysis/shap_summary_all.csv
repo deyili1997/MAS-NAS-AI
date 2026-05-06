@@ -1,4 +1,6 @@
-hospital,task,mean_abs_shap_embed_dim,mean_abs_shap_depth,mean_abs_shap_mlp_ratio,mean_abs_shap_num_heads
-MIMIC-IV,death,1.7317569,0.8029798,0.45635033,0.66882277
-MIMIC-IV,readmission,0.9270383,0.12911846,0.38779762,0.24221078
-MIMIC-IV,stay,0.8095466,0.50816387,0.967642,0.7164557
+task,n_hospitals,n_rows,mean_abs_shap_embed_dim,mean_abs_shap_depth,mean_abs_shap_mlp_ratio,mean_abs_shap_num_heads
+death,1,20,4.554059,1.1045371,0.4890236,0.4589668
+next_diag_12m_pheno,1,20,4.7983623,0.24545369,0.50871736,0.55536443
+next_diag_6m_pheno,1,20,4.907008,0.48128003,0.4391311,0.16169338
+readmission,1,20,2.512034,0.5736426,0.40018043,0.43668184
+stay,1,20,4.551055,0.45303002,0.34126726,0.6424336

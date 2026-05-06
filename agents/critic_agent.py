@@ -71,11 +71,28 @@ def _build_prompt(context, search_state, proposals, max_params, strategy=None,
         for i, arch in enumerate(top_k):
             parts.append(f"  Top-{i+1}: {json.dumps(arch, default=_np_default)}\n")
 
-    shap = context.get("shap_importance", {})
-    if shap:
-        parts.append(f"\n## SHAP Feature Importance\n")
-        for feat, val in sorted(shap.items(), key=lambda x: -x[1]):
-            parts.append(f"  {feat}: {val:.4f}\n")
+    # Layer 2: Architecture Prior (meta-regression) — soft directional guidance
+    arch_prior = context.get("meta_regression_prior") or {}
+    if arch_prior:
+        parts.append("\n## Architecture Prior (SOFT directional guidance from meta-regression)\n")
+        order = arch_prior.get("feature_importance_order", [])
+        if order:
+            parts.append(f"Feature importance: {' > '.join(order)}\n")
+        preferred = arch_prior.get("preferred_levels", {}) or {}
+        discouraged = arch_prior.get("discouraged_levels", {}) or {}
+        confidence = arch_prior.get("confidence", {}) or {}
+        if any(preferred.values()):
+            parts.append("Preferred levels (positive cross-hospital SHAP):\n")
+            for feat in order or list(preferred.keys()):
+                lvls = preferred.get(feat, [])
+                if lvls:
+                    parts.append(f"  {feat}: {lvls}    [confidence: {confidence.get(feat, 'unknown')}]\n")
+        if any(discouraged.values()):
+            parts.append("Discouraged levels (negative cross-hospital SHAP):\n")
+            for feat in order or list(discouraged.keys()):
+                lvls = discouraged.get(feat, [])
+                if lvls:
+                    parts.append(f"  {feat}: {lvls}    [confidence: {confidence.get(feat, 'unknown')}]\n")
 
     # Already tried
     completed = search_state.get("completed_experiments", [])
@@ -105,19 +122,33 @@ def _build_prompt(context, search_state, proposals, max_params, strategy=None,
             "performers. Reject proposals that deviate too far from the proven good region.\n"
         )
 
-    # Instructions
+    # Instructions — bifurcate HARD constraints vs SOFT signals
     parts.append(
         "\n## Your Task\n"
         "Review each proposal. For each one, decide: ACCEPT or REJECT.\n"
         "Do NOT provide revised configs — just explain what is wrong so the "
         "proposal agent can fix it.\n\n"
-        "Check for:\n"
-        "1. Does the architecture respect embed_dim % num_heads == 0?\n"
-        "2. Is it too similar to an already-tried architecture? (same embed_dim, depth, "
-        "mlp_ratio, and num_heads)\n"
-        "3. Does it leverage SHAP insights? (if a feature has high importance, "
-        "is the proposal exploring variation in that dimension?)\n"
-        "4. Is the proposal diverse enough relative to other proposals in this batch?\n\n"
+        "**Two categories of constraints**:\n\n"
+        "### 1. HARD constraints — auto-reject if violated\n"
+        "  - max_params budget exceeded (>2M unless overridden)\n"
+        "  - embed_dim NOT divisible by num_heads\n"
+        "  - exact duplicate of an already-tried architecture\n"
+        "  - exact duplicate of a Top-k historical architecture (proposal duplicates known evidence)\n"
+        "\n"
+        "### 2. SOFT signals — flag and require justification, but do NOT auto-reject\n"
+        "  - Discouraged level used (e.g. embed_dim=32 listed as discouraged)\n"
+        "  - Avoid_combination interaction used (from Architecture Prior)\n"
+        "  - Doesn't explore high-importance features (e.g. only varies low-importance num_heads)\n"
+        "\n"
+        "**For SOFT signals**:\n"
+        "  - Check the proposal's `rationale` field for explicit justification.\n"
+        "  - If rationale is convincing (e.g. \"exploring under-represented region\", "
+        "\"complementary to Top-k coverage\", \"specific to data property X\") → ACCEPT.\n"
+        "  - If rationale is absent or weak (e.g. \"just trying it\") → REJECT with critique:\n"
+        "    \"Proposal uses discouraged <level> without justification. Please explain why "
+        "this might work despite cross-hospital evidence of negative SHAP contribution.\"\n"
+        "  - Goal: encourage informed deviation, discourage blind violation.\n"
+        "\n"
         "## Output Format\n"
         "Return a JSON array. Each element:\n"
         "```json\n"
@@ -125,19 +156,26 @@ def _build_prompt(context, search_state, proposals, max_params, strategy=None,
         "  {\n"
         '    "proposal_idx": 0,\n'
         '    "decision": "accept",\n'
-        '    "critique": "Looks good, explores high-SHAP depth dimension",\n'
+        '    "critique": "Looks good, explores high-importance embed_dim dimension",\n'
         '    "risk_tags": []\n'
         "  },\n"
         "  {\n"
         '    "proposal_idx": 1,\n'
         '    "decision": "reject",\n'
-        '    "critique": "embed_dim=64 with num_heads=8 is valid but too similar to already-tried arch #3. Also ignores high-SHAP mlp_ratio dimension.",\n'
-        '    "risk_tags": ["too_similar", "ignores_shap"]\n'
+        '    "critique": "embed_dim=64 with num_heads=8 is valid but too similar to already-tried arch #3 (HARD: too_similar).",\n'
+        '    "risk_tags": ["too_similar"]\n'
+        "  },\n"
+        "  {\n"
+        '    "proposal_idx": 2,\n'
+        '    "decision": "reject",\n'
+        '    "critique": "embed_dim=32 is in discouraged_levels (SOFT) but rationale only says \"exploring small\". Please justify why this might work despite negative cross-hospital SHAP.",\n'
+        '    "risk_tags": ["uses_discouraged_level"]\n'
         "  }\n"
         "]\n"
         "```\n"
-        'Valid risk_tags: "too_large", "too_similar", "constraint_violation", '
-        '"unexplored_region", "ignores_shap"\n\n'
+        'Valid risk_tags:\n'
+        '  HARD: "too_large", "too_similar", "constraint_violation"\n'
+        '  SOFT: "uses_discouraged_level", "uses_avoid_combination", "ignores_high_importance_features"\n\n'
         "Return ONLY valid JSON, no markdown code fences, no extra text.\n"
     )
 

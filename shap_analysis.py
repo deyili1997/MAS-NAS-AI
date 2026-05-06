@@ -29,10 +29,22 @@ ARCH_COLS = ["embed_dim", "depth", "mlp_ratio", "num_heads"]
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Per-task SHAP analysis on NAS metadata")
+    p = argparse.ArgumentParser(
+        description="Per-task SHAP analysis on NAS metadata, pooled across hospitals.")
     p.add_argument("--results_dir", type=str, default="./results",
-                   help="Root results directory containing per-hospital metadata.csv files")
-    p.add_argument("--output_dir", type=str, default="./results/shap_analysis")
+                   help="Root results directory containing per-hospital metadata.csv files. "
+                        "Globs <results_dir>/*/metadata.csv for source data.")
+    p.add_argument("--output_dir", type=str, default="./results/shap_analysis",
+                   help="Where to write per-task SHAP outputs. "
+                        "Layout: <output_dir>/<task>/{shap_summary.png, shap_bar.png, "
+                        "shap_with_regression.png, shap_interaction_*.png, "
+                        "shap_values.csv, mean_abs_shap.csv}.")
+    p.add_argument("--hospitals", type=str, nargs="+", default=None,
+                   help="Filter to specific hospitals before pooling. "
+                        "If omitted, all hospitals under --results_dir are pooled. "
+                        "Phase 2 standard:  --hospitals OneFL_H1 OneFL_H2 ... OneFL_H10 "
+                        "Phase 1 / single-hospital test:  --hospitals MIMIC-IV "
+                        "(filter to 1 hospital → effectively per-hospital × per-task SHAP).")
     p.add_argument("--interaction_main", type=str, nargs="+",
                    default=["embed_dim"],
                    choices=ARCH_COLS,
@@ -45,16 +57,34 @@ def parse_args():
     return p.parse_args()
 
 
-def load_metadata(results_dir: str) -> pd.DataFrame:
-    """Load and concatenate all metadata.csv files across hospitals."""
+def load_metadata(results_dir: str, hospitals_filter: list = None) -> pd.DataFrame:
+    """Load and concatenate all metadata.csv files across hospitals.
+
+    Args:
+        results_dir: Glob root, expects <results_dir>/<hospital>/metadata.csv
+        hospitals_filter: Optional list of hospital names to keep. If None,
+            uses all hospitals found under results_dir. Hospitals not in
+            this filter are dropped before SHAP analysis.
+    """
     pattern = os.path.join(results_dir, "*", "metadata.csv")
     files = sorted(glob.glob(pattern))
     if not files:
         raise FileNotFoundError(f"No metadata.csv files found under {results_dir}/*/")
     dfs = [pd.read_csv(f) for f in files]
     df = pd.concat(dfs, ignore_index=True)
-    print(f"Loaded {len(df)} rows from {len(files)} hospital(s): "
-          f"{df['hospital'].unique().tolist()}")
+    print(f"Loaded {len(df)} rows from {len(files)} metadata.csv file(s).")
+    print(f"  Hospitals found: {df['hospital'].unique().tolist()}")
+
+    if hospitals_filter:
+        before = len(df)
+        df = df[df["hospital"].isin(hospitals_filter)].reset_index(drop=True)
+        print(f"  Filtered to {hospitals_filter}: {before} → {len(df)} rows.")
+        if len(df) == 0:
+            raise ValueError(
+                f"No rows remain after filtering. Hospitals in data: "
+                f"{df['hospital'].unique().tolist()}, requested: {hospitals_filter}.")
+    print(f"  Final pool: {df['hospital'].nunique()} hospital(s) "
+          f"({df['hospital'].unique().tolist()}), {len(df)} rows total.")
     return df
 
 
@@ -78,13 +108,23 @@ def compute_avg_rank(group: pd.DataFrame) -> np.ndarray:
     return ranks.mean(axis=1).values
 
 
-def run_shap_for_group(X, y, group_name, output_dir, interaction_mains=("embed_dim",)):
-    """Train XGBoost and compute SHAP for one (hospital, task) group.
+def run_shap_for_group(X, y, group_name, output_dir, interaction_mains=("embed_dim",),
+                       hospitals=None):
+    """Train XGBoost and compute SHAP for one task group (pooled across hospitals).
 
-    interaction_mains: iterable of architecture feature names to use as the
-        "main" feature in dependence/interaction plots. For each, produces
-        shap_interaction_<feat>.png with sub-panels for interactions with the
-        other 3 features. Default: only embed_dim."""
+    Args:
+        X: pd.DataFrame of architecture features (4 columns from ARCH_COLS).
+        y: composite target (-avg_rank), higher = better.
+        group_name: label for plot titles.
+        output_dir: where to write outputs.
+        interaction_mains: iterable of architecture feature names to use as
+            the "main" feature in dependence/interaction plots. For each,
+            produces shap_interaction_<feat>.png with sub-panels for
+            interactions with the other 3 features. Default: only embed_dim.
+        hospitals: Optional pd.Series with same index as X giving the
+            hospital each row came from. Saved alongside shap_values so
+            run_meta_regression.py can fit hospital-random-intercept models.
+    """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -117,11 +157,22 @@ def run_shap_for_group(X, y, group_name, output_dir, interaction_mains=("embed_d
     plt.savefig(output_dir / "shap_bar.png", dpi=150)
     plt.close()
 
-    # SHAP values CSV
-    shap_df = pd.DataFrame(shap_values, columns=ARCH_COLS)
+    # SHAP values CSV — long-format with hospital + X cols + signed SHAP cols.
+    # Layout enables run_meta_regression.py to fit categorical mixed-effect
+    # models like `shap_<feat> ~ C(<feat>) + (1 | hospital)` directly.
+    shap_df = pd.DataFrame(shap_values, columns=[f"shap_{c}" for c in ARCH_COLS])
+    if hospitals is not None:
+        shap_df["hospital"] = hospitals.values
+    for c in ARCH_COLS:
+        shap_df[c] = X[c].values
+    # Reorder columns for readability: hospital, arch features, signed SHAPs.
+    col_order = (["hospital"] if hospitals is not None else []) + \
+                list(ARCH_COLS) + \
+                [f"shap_{c}" for c in ARCH_COLS]
+    shap_df = shap_df[col_order]
     shap_df.to_csv(output_dir / "shap_values.csv", index=False)
 
-    # Mean |SHAP| per feature
+    # Mean |SHAP| per feature (Fig 4 配套数值表; not loaded by mas_search anymore)
     mean_abs = pd.Series(np.abs(shap_values).mean(axis=0), index=ARCH_COLS)
     mean_abs = mean_abs.sort_values(ascending=False)
     mean_abs.to_csv(output_dir / "mean_abs_shap.csv", header=False)
@@ -267,17 +318,22 @@ def _save_shap_interaction(X, shap_values, group_name, output_dir, main_feature=
 
 def main():
     args = parse_args()
-    df = load_metadata(args.results_dir)
+    df = load_metadata(args.results_dir, args.hospitals)
     df = prepare_features(df)
 
     all_shap_summary = []
 
-    for (hospital, task), group in df.groupby(["hospital", "task"]):
+    # Pool by task ACROSS all hospitals in the filtered set.
+    # Output layout: <output_dir>/<task>/...   (no per-hospital subdir)
+    # Sample size: ~K_archs × n_hospitals per task (vs K_archs alone in old per-hospital design).
+    for task, group in df.groupby("task"):
         group = group.reset_index(drop=True)
-        group_name = f"{hospital}/{task}"
+        n_hospitals = group["hospital"].nunique()
+        n_rows = len(group)
+        group_name = f"task={task} (pooled across {n_hospitals} hospital(s), n={n_rows})"
 
-        if len(group) < 5:
-            print(f"  [{group_name}] skipped — only {len(group)} samples (need >= 5)")
+        if n_rows < 5:
+            print(f"  [{group_name}] skipped — only {n_rows} samples (need >= 5)")
             continue
 
         # Compute composite target: negate avg_rank so higher = better performance
@@ -286,19 +342,25 @@ def main():
         y = -avg_rank
 
         X = group[ARCH_COLS].copy()
+        hospitals = group["hospital"]   # for run_meta_regression mixed-effect models
 
-        group_output = Path(args.output_dir) / hospital / task
+        group_output = Path(args.output_dir) / task
         mean_abs = run_shap_for_group(
             X, y, group_name, group_output,
             interaction_mains=args.interaction_main,
+            hospitals=hospitals,
         )
 
-        row = {"hospital": hospital, "task": task}
+        row = {
+            "task": task,
+            "n_hospitals": n_hospitals,
+            "n_rows": n_rows,
+        }
         for feat in ARCH_COLS:
             row[f"mean_abs_shap_{feat}"] = mean_abs[feat]
         all_shap_summary.append(row)
 
-    # Save combined summary
+    # Save combined summary (paper artifact + run_meta_regression input)
     if all_shap_summary:
         summary_df = pd.DataFrame(all_shap_summary)
         out_path = Path(args.output_dir) / "shap_summary_all.csv"

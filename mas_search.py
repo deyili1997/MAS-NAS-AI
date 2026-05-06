@@ -292,41 +292,72 @@ def _get_top_k_archs(metadata_df, hospital, task, max_params, top_k,
     return archs, matched_task, matched_similarity
 
 
-def _load_shap_importance(results_dir, hospital, task):
-    """Load mean |SHAP| values for the given hospital+task."""
-    shap_path = Path(results_dir) / "shap_analysis" / hospital / task / "mean_abs_shap.csv"
-    if not shap_path.exists():
-        print(f"  [Context] No SHAP data at {shap_path}")
+def _load_meta_regression_prior(history_root, task) -> dict:
+    """Load Layer 2 architecture_prior.json for the matched task.
+
+    Per-task pooled prior produced by `run_meta_regression.py` (mixed-effect
+    models on signed SHAP across all source hospitals). Contains preferred /
+    discouraged / interaction rules + confidence labels — for LLM agents'
+    soft directional guidance.
+
+    Path: <history_root>/meta_regression/<task>/architecture_prior.json
+
+    Returns empty dict if file doesn't exist (Phase 1, or before Stage A.4 has
+    been run). The agent prompts handle empty meta_regression_prior gracefully
+    by skipping the architecture_prior section."""
+    prior_path = Path(history_root) / "meta_regression" / task / "architecture_prior.json"
+    if not prior_path.exists():
+        print(f"  [Context] No meta-regression prior at {prior_path}")
         return {}
 
-    df = pd.read_csv(shap_path, index_col=0, header=None)
-    return {str(k): float(v) for k, v in zip(df.index, df.iloc[:, 0])}
+    import json
+    with open(prior_path) as f:
+        prior = json.load(f)
+    print(f"  Layer 2 architecture_prior loaded ({task}):")
+    print(f"    feature importance order: {prior.get('feature_importance_order', [])}")
+    print(f"    preferred levels:         {prior.get('preferred_levels', {})}")
+    print(f"    discouraged levels:       {prior.get('discouraged_levels', {})}")
+    print(f"    confidence:               {prior.get('confidence', {})}")
+    return prior
 
 
 def gather_historical_context(hospital, task, max_params, history_root, top_k,
                               exclude_exact_task_from_history=False,
-                              no_history=False):
+                              no_history=False,
+                              no_meta_regression=False):
     """
     Gather historical context for the target hospital and task.
 
-    Reads from `history_root` (hospital-level INPUT root):
-      - <history_root>/<*>/dataset_summary.csv   (similar-hospital matching)
-      - <history_root>/<*>/metadata.csv          (top-k arch retrieval)
-      - <history_root>/shap_analysis/<...>/      (SHAP importance)
+    Two-layer prior design:
+      Layer 1 (dataset similarity, in this function):
+        - <history_root>/<*>/dataset_summary.csv   → cosine to pick matched source hospital
+        - <history_root>/<*>/metadata.csv          → top-k concrete architecture examples
+        - Plan A 6-D task feature cosine fallback when exact target task missing
+      Layer 2 (architecture-effect, NEW via run_meta_regression.py):
+        - <history_root>/meta_regression/<task>/architecture_prior.json
+          → preferred / discouraged levels + interaction rules + confidence labels
+          → SOFT directional priors for LLM agents (NOT causal rules; see _caveat).
 
-    Returns dict with target_summary, similar_hospital, similarity_score,
-    matched_task, matched_task_similarity, top_k_archs, shap_importance.
-    `matched_task_similarity` is None for exact task match, else the cosine
-    similarity (in 6-D task feature space) between target and matched source
-    task — useful for downstream agents to calibrate trust in the prior.
+    Returns dict with:
+      target_summary, similar_hospital, similarity_score,
+      matched_task, matched_task_similarity, top_k_archs,
+      meta_regression_prior  (Layer 2 architecture_prior.json content; {} if absent)
+
+    Note: legacy `shap_importance` field has been removed — Layer 2 supersedes it
+    with finer-grained per-level effects + interaction rules.
 
     Robustness-ablation knobs (Fig 5):
       - `exclude_exact_task_from_history` (bool): drop rows where the target
         task already exists in the matched source hospital's metadata, forcing
         the cosine-fallback path even when an exact match exists. Used by the
-        `mas_loto` ablation method.
-      - `no_history` (bool): bypass everything and return an empty context
-        dict (top_k_archs=[], shap_importance={}). Used by `mas_cold`.
+        `mas_loto` ablation method. Layer 2 stays ON (architecture_prior still loaded).
+      - `no_meta_regression` (bool): keep Layer 1 retrieval ON but disable Layer 2
+        (skip loading `architecture_prior.json`; return `meta_regression_prior={}`).
+        Used by the `mas_layer1_only` ablation, which isolates the incremental
+        contribution of Layer 2 beyond exact-task retrieval alone.
+      - `no_history` (bool): bypass everything (Layer 1 AND Layer 2) and return an
+        empty context dict (top_k_archs=[], meta_regression_prior={}). Used by
+        `mas_cold` — both prior layers are off; pure multi-agent reasoning only.
     """
     print("\n[Historical Context]")
 
@@ -339,7 +370,7 @@ def gather_historical_context(hospital, task, max_params, history_root, top_k,
             "matched_task": task,
             "matched_task_similarity": None,
             "top_k_archs": [],
-            "shap_importance": {},
+            "meta_regression_prior": {},
         }
 
     print(f"  Computing dataset summary for {hospital}...")
@@ -368,7 +399,7 @@ def gather_historical_context(hospital, task, max_params, history_root, top_k,
             "matched_task": task,
             "matched_task_similarity": None,
             "top_k_archs": [],
-            "shap_importance": {},
+            "meta_regression_prior": {},
         }
 
     similar_hospital, sim_score = _find_most_similar_hospital(target_summary, historical_df)
@@ -382,7 +413,7 @@ def gather_historical_context(hospital, task, max_params, history_root, top_k,
             "matched_task": task,
             "matched_task_similarity": None,
             "top_k_archs": [],
-            "shap_importance": {},
+            "meta_regression_prior": {},
         }
 
     metadata_pattern = os.path.join(history_root, "*", "metadata.csv")
@@ -416,11 +447,16 @@ def gather_historical_context(hospital, task, max_params, history_root, top_k,
         match_str = f"{similar_hospital}/{matched_task} (task-feature sim={matched_task_similarity:.4f})"
     print(f"  Retrieved {len(top_k_archs)} top architectures from {match_str}")
 
-    shap_importance = _load_shap_importance(history_root, similar_hospital, matched_task)
-    if shap_importance:
-        print(f"  SHAP importance: {shap_importance}")
+    # Layer 2: load architecture_prior.json (per-task pooled meta-regression)
+    # Note: keyed by matched_task (not similar_hospital) — Layer 2 is hospital-agnostic
+    # by design (pooled across all source hospitals when generated).
+    # The `--no_meta_regression` knob (mas_layer1_only ablation) skips this load
+    # so the agent prompts never see Layer 2 — Layer 1 retrieval stays untouched.
+    if no_meta_regression:
+        print("  [LAYER1-ONLY] --no_meta_regression set; skipping Layer 2 architecture_prior load.")
+        meta_regression_prior = {}
     else:
-        print("  No SHAP data available")
+        meta_regression_prior = _load_meta_regression_prior(history_root, matched_task)
 
     return {
         "target_summary": target_summary,
@@ -429,7 +465,7 @@ def gather_historical_context(hospital, task, max_params, history_root, top_k,
         "matched_task": matched_task,
         "matched_task_similarity": matched_task_similarity,
         "top_k_archs": top_k_archs,
-        "shap_importance": shap_importance,
+        "meta_regression_prior": meta_regression_prior,
     }
 
 
@@ -474,6 +510,12 @@ def parse_args():
                    help="LOTO ablation: drop rows where task==target from metadata "
                         "before _get_top_k_archs, forcing the cosine-similarity "
                         "fallback path. Used by mas_loto.")
+    p.add_argument("--no_meta_regression", action="store_true",
+                   help="Layer-1-only ablation: keep Layer 1 retrieval (top-k archs + "
+                        "dataset similarity) but disable Layer 2 (skip loading "
+                        "architecture_prior.json; meta_regression_prior={}). Used by "
+                        "mas_layer1_only — isolates the incremental contribution of "
+                        "Layer 2 beyond exact-task retrieval alone.")
     p.add_argument("--no_history", action="store_true",
                    help="Cold-start ablation: skip historical context entirely "
                         "(empty top_k_archs, no SHAP, no similar-hospital). "
@@ -539,15 +581,19 @@ def _compute_avg_rank(df):
 def _method_name(args) -> str:
     """Resolve method name (and output subdir) from ablation flags.
 
-    Default = `mas`; the two robustness-ablation variants get distinct names
-    so their outputs don't clobber the regular MAS run:
-      --exclude_exact_task_from_history  → `mas_loto`
-      --no_history                       → `mas_cold`
+    Default = `mas`; ablation variants get distinct names so their outputs
+    don't clobber the regular MAS run. Precedence (most-restrictive first):
+      --no_history                       → `mas_cold`        (Layer 1 OFF, Layer 2 OFF)
+      --exclude_exact_task_from_history  → `mas_loto`        (Layer 1 task fallback, Layer 2 ON)
+      --no_meta_regression               → `mas_layer1_only` (Layer 1 ON exact, Layer 2 OFF)
+      (none)                             → `mas`             (Layer 1 ON exact, Layer 2 ON)
     """
     if getattr(args, "no_history", False):
         return "mas_cold"
     if getattr(args, "exclude_exact_task_from_history", False):
         return "mas_loto"
+    if getattr(args, "no_meta_regression", False):
+        return "mas_layer1_only"
     return "mas"
 
 
@@ -655,6 +701,7 @@ def main():
         top_k=args.top_k,
         exclude_exact_task_from_history=args.exclude_exact_task_from_history,
         no_history=args.no_history,
+        no_meta_regression=args.no_meta_regression,
     )
 
     tracer.log_section("PHASE 0 — HISTORICAL CONTEXT")
@@ -664,7 +711,17 @@ def main():
     tracer.log_kv("Similar hospital", sim_str)
     tracer.log_kv("Matched task", context.get("matched_task", args.task))
     tracer.log_arch_table(context.get("top_k_archs", []), label="Top-k historical architectures")
-    tracer.log_shap(context.get("shap_importance"))
+
+    # Layer 2 architecture_prior summary (replaces old Layer 1 shap_importance log)
+    arch_prior = context.get("meta_regression_prior") or {}
+    if arch_prior:
+        tracer.log_subsection("Layer 2: Architecture Prior (meta-regression)")
+        tracer.log_kv("feature_importance_order", arch_prior.get("feature_importance_order", []))
+        tracer.log_kv("preferred_levels", arch_prior.get("preferred_levels", {}))
+        tracer.log_kv("discouraged_levels", arch_prior.get("discouraged_levels", {}))
+        tracer.log_kv("confidence", arch_prior.get("confidence", {}))
+    else:
+        tracer.log_kv("Layer 2 architecture_prior", "(not available — Phase 1 / no meta_regression run)")
 
     # =============================================
     # Search loop: Agent 1 (Proposal) -> Agent 2 (Critic) -> Agent 3 (Experiment + Strategy)

@@ -1,0 +1,2 @@
+task,importance_rank,mean_abs_shap_embed_dim,mean_abs_shap_depth,mean_abs_shap_mlp_ratio,mean_abs_shap_num_heads
+next_diag_6m_pheno,"embed_dim,depth,mlp_ratio,num_heads",4.907007707749999,0.48127998388849996,0.43913111020000006,0.16169338625

@@ -1,25 +1,25 @@
-"""Fig 5 — LOTO + Cold-Start Robustness Ablation.
+"""Fig 5 — Layer Ablation (4-condition factorial).
 
 For each of the 5 tasks, plot a grouped bar chart comparing:
-  - MAS-NAS (exact match)        full historical context, exact task in metadata
-  - MAS-NAS (LOTO)               target task removed → cosine fallback path
-  - MAS-NAS (cold)               no historical context at all
+  - MAS-NAS (exact)              Layer 1 exact + Layer 2 ON  — full method
+  - MAS-NAS (L1-only)            Layer 1 exact + Layer 2 OFF — isolates Layer 2 contribution
+  - MAS-NAS (LOTO)               Layer 1 fallback + Layer 2 ON — Layer 1 robustness
+  - MAS-NAS (cold)               Layer 1 OFF + Layer 2 OFF   — no prior at all
   - Best LLM baseline            max(LLMatic, CoLLM-NAS) per task
 
 Reads:
     results/seed_<SEED>/<hospital>/search/<method>/<task>/<method>_best.csv
-    where <method> ∈ {mas, mas_loto, mas_cold, baseline3, baseline4}
+    where <method> ∈ {mas, mas_layer1_only, mas_loto, mas_cold, baseline3, baseline4}
 
 Outputs:
     figure5_loto_robustness.png — 5 panels (one per task) of grouped bars
                                   with std error bars; * marks p<0.05
                                   (paired Wilcoxon: MAS-LOTO vs best-baseline)
 
-Paper claim:
-    "Even when the target task is removed from historical metadata (LOTO),
-     MAS-NAS still outperforms the strongest baseline. Cold-start MAS-NAS
-     further degrades but typically remains competitive, confirming that
-     multi-agent collaboration provides value beyond the historical prior."
+Paper claims (each isolated by one delta in the companion table):
+    delta_layer1_only_vs_exact ★ value added by Layer 2 beyond Layer 1 retrieval
+    delta_loto_vs_exact          Layer 1 graceful fallback when exact task missing
+    delta_cold_vs_baseline       multi-agent reasoning beats LLM baselines even with no prior
 
 Usage:
     python analyze/plot_loto_ablation.py --hospital MIMIC-IV
@@ -37,12 +37,13 @@ import pandas as pd
 from scipy.stats import wilcoxon
 
 
-# Colors: MAS variants = same crimson family (intensity ~ amount of context),
+# Colors: MAS variants = same crimson family (intensity ~ amount of prior context),
 # baseline = neutral gray. Reuses METHOD_COLOR convention from plot_pareto.py.
 CONDITION_COLOR = {
-    "mas":      "#DC143C",   # crimson — full context
-    "mas_loto": "#FF6B6B",   # lighter crimson — degraded but still has fallback prior
-    "mas_cold": "#FFB3B3",   # pink — no prior at all
+    "mas":             "#DC143C",   # crimson — full method (Layer 1 + Layer 2)
+    "mas_layer1_only": "#E74C3C",   # slightly lighter — Layer 1 only (no Layer 2)
+    "mas_loto":        "#FF6B6B",   # pink-red — Layer 1 fallback + Layer 2
+    "mas_cold":        "#FFB3B3",   # pale pink — no prior at all
     # Baseline color resolved at plot time from BASELINE_COLOR
 }
 BASELINE_COLOR = {
@@ -55,9 +56,10 @@ BASELINE_DISPLAY = {
 }
 
 CONDITION_DISPLAY = {
-    "mas":      "MAS-NAS\n(exact)",
-    "mas_loto": "MAS-NAS\n(LOTO)",
-    "mas_cold": "MAS-NAS\n(cold)",
+    "mas":             "MAS-NAS\n(exact)",
+    "mas_layer1_only": "MAS-NAS\n(L1-only)",
+    "mas_loto":        "MAS-NAS\n(LOTO)",
+    "mas_cold":        "MAS-NAS\n(cold)",
 }
 
 LLM_BASELINE_METHODS = ["baseline3", "baseline4"]
@@ -153,11 +155,11 @@ def paired_wilcoxon(a_dict: dict, b_dict: dict) -> float | None:
 # Per-task plotting
 # ---------------------------------------------------------------------------
 def plot_panel(ax, all_scores: dict, task: str):
-    """Draw one panel: 4 grouped bars for one task."""
+    """Draw one panel: 5 grouped bars for one task (4 MAS conditions + best baseline)."""
     bb_method = best_baseline_per_task(all_scores, task)
 
-    # Resolve display order + values
-    cond_order = ["mas", "mas_loto", "mas_cold"]
+    # Resolve display order: most-context → least-context, then best-baseline
+    cond_order = ["mas", "mas_layer1_only", "mas_loto", "mas_cold"]
     if bb_method:
         cond_order.append(bb_method)
 
@@ -191,12 +193,14 @@ def plot_panel(ax, all_scores: dict, task: str):
                     ha="center", va="bottom", fontsize=7, color="dimgray")
 
     # Significance: paired Wilcoxon (MAS-LOTO vs best-baseline, one-sided LOTO>baseline)
-    if bb_method and len(cond_order) == 4:
+    # In the 4-condition factorial, MAS-LOTO is index 2 and best-baseline is index 4.
+    if bb_method and len(cond_order) == 5:
         loto_dict = all_scores.get(("mas_loto", task), {})
         bl_dict = all_scores.get((bb_method, task), {})
         p = paired_wilcoxon(loto_dict, bl_dict)
         if p is not None and p < 0.05:
-            i_loto, i_bl = 1, 3
+            i_loto = cond_order.index("mas_loto")
+            i_bl = cond_order.index(bb_method)
             y_top = max(means_pct[i_loto] + stds_pct[i_loto],
                         means_pct[i_bl] + stds_pct[i_bl]) + 1.5
             ax.plot([i_loto, i_loto, i_bl, i_bl],
@@ -243,10 +247,11 @@ def main():
     print(f"[Fig 5] loaded {len(all_scores)} (method, task) groups")
 
     if not all_scores:
-        print("⚠ No best.csv records found. Submit mas + mas_loto + mas_cold + baseline3/4 jobs first.")
+        print("⚠ No best.csv records found. Submit mas + mas_layer1_only + mas_loto + mas_cold + baseline3/4 jobs first.")
         return
 
-    fig, axes = plt.subplots(1, len(TASKS), figsize=(4.0 * len(TASKS), 4.5), sharey=False)
+    # 5 bars per panel (4 MAS conditions + 1 baseline) needs slightly more width
+    fig, axes = plt.subplots(1, len(TASKS), figsize=(4.5 * len(TASKS), 4.5), sharey=False)
     if len(TASKS) == 1:
         axes = [axes]
 
@@ -254,8 +259,8 @@ def main():
         plot_panel(ax, all_scores, task)
 
     fig.suptitle(
-        f"LOTO + Cold-Start Robustness — {args.hospital}\n"
-        f"(MAS-NAS retains performance even when target task is missing from history)",
+        f"Layer Ablation — {args.hospital}\n"
+        f"(L1-only isolates Layer 2's contribution; LOTO tests Layer 1 fallback; cold removes both priors)",
         fontsize=12, y=1.04,
     )
     plt.tight_layout()

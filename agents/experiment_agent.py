@@ -266,13 +266,20 @@ def _build_strategy_prompt(context, search_state):
         for i, arch in enumerate(top_k):
             parts.append(f"  Top-{i+1}: {json.dumps(arch, default=_np_default)}\n")
 
-    # SHAP importance
-    shap = context.get("shap_importance", {})
-    if shap:
-        parts.append("\n## SHAP Feature Importance\n")
-        parts.append("These show which architecture features matter most for performance:\n")
-        for feat, val in sorted(shap.items(), key=lambda x: -x[1]):
-            parts.append(f"  {feat}: {val:.4f}\n")
+    # Layer 2 architecture prior — secondary signal for strategy (empirical primary)
+    arch_prior = context.get("meta_regression_prior") or {}
+    if arch_prior:
+        parts.append("\n## Architecture Prior (secondary signal — empirical evidence is primary)\n")
+        order = arch_prior.get("feature_importance_order", [])
+        if order:
+            parts.append(f"Feature importance: {' > '.join(order)}\n")
+        preferred = arch_prior.get("preferred_levels", {}) or {}
+        if any(preferred.values()):
+            parts.append("Preferred region (cross-hospital pooled signal):\n")
+            for feat in order or list(preferred.keys()):
+                lvls = preferred.get(feat, [])
+                if lvls:
+                    parts.append(f"  {feat}: {lvls}\n")
 
     # Completed experiments
     completed = search_state.get("completed_experiments", [])
@@ -285,18 +292,23 @@ def _build_strategy_prompt(context, search_state):
     budget = search_state.get("budget_remaining", 0)
     parts.append(f"\n## Budget Remaining: {budget} architectures\n")
 
-    # Decision criteria
+    # Decision criteria — empirical evidence (completed exps) primary, Layer 2 secondary
     parts.append(
         "\n## Decision Guidelines\n"
+        "**Primary signal**: distribution + variance + best-so-far across completed_experiments.\n"
+        "**Secondary signal**: Architecture Prior (Layer 2 cross-hospital meta-regression).\n\n"
         "Choose EXPLORATION when:\n"
         "- Few experiments completed so far (search space not well covered)\n"
         "- Results are similar across tried architectures (no clear winner yet)\n"
-        "- Important SHAP features have not been sufficiently varied\n"
+        "- High-importance features (per Architecture Prior) have not been sufficiently varied\n"
         "- Budget is still large relative to search space\n\n"
         "Choose EXPLOITATION when:\n"
-        "- A clear best-performing region has emerged\n"
+        "- A clear best-performing region has emerged from completed experiments\n"
         "- Budget is running low — focus on refining the best candidates\n"
-        "- High-SHAP features have a clear optimal range from the data\n\n"
+        "- Best-so-far architectures cluster in the Architecture Prior's preferred region "
+        "(empirical aligns with prior → confidence high to exploit)\n"
+        "- BUT: if best-so-far is in NON-preferred region of Architecture Prior, "
+        "trust the empirical evidence — the prior may not apply to this specific target.\n\n"
     )
 
     # Output format

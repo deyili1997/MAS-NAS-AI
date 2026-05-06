@@ -95,18 +95,63 @@ def _build_prompt(context, search_state, max_params, strategy=None, max_flops=No
             "propose a diverse set of architectures for exploration.\n"
         )
 
-    # SHAP importance
-    shap = context.get("shap_importance", {})
-    if shap:
-        parts.append(f"\n## SHAP Feature Importance (from historical data)\n")
+    # Layer 2: Architecture Prior (meta-regression across hospitals)
+    # SOFT directional guidance from cross-hospital pooled SHAP — NOT prescriptive rules.
+    arch_prior = context.get("meta_regression_prior") or {}
+    if arch_prior:
         parts.append(
-            "These show which architecture features matter most for performance:\n"
+            "\n## Architecture Prior — SOFT statistical guidance, NOT prescriptive rules\n"
+            "\n"
+            "The following levels show stable cross-hospital SHAP signals from a "
+            "pooled meta-regression across multiple source hospitals. **Treat as "
+            "directional priors, not hard constraints.** SHAP values come from an "
+            "XGBoost surrogate; CI > 0 means cross-hospital stability, not causal "
+            "benefit.\n"
         )
-        for feat, val in sorted(shap.items(), key=lambda x: -x[1]):
-            parts.append(f"  {feat}: {val:.4f}\n")
+        # Feature importance ranking
+        order = arch_prior.get("feature_importance_order", [])
+        if order:
+            parts.append(f"\n### Feature importance ranking (high → low)\n  {' > '.join(order)}\n")
+        # Preferred / discouraged levels with confidence
+        preferred = arch_prior.get("preferred_levels", {}) or {}
+        discouraged = arch_prior.get("discouraged_levels", {}) or {}
+        confidence = arch_prior.get("confidence", {}) or {}
+        if any(preferred.values()):
+            parts.append("\n### Preferred levels (stable positive SHAP, with confidence)\n")
+            for feat in order or list(preferred.keys()):
+                lvls = preferred.get(feat, [])
+                if lvls:
+                    parts.append(f"  {feat}: ∈ {lvls}    [confidence: {confidence.get(feat, 'unknown')}]\n")
+        if any(discouraged.values()):
+            parts.append("\n### Discouraged levels (stable negative SHAP)\n")
+            for feat in order or list(discouraged.keys()):
+                lvls = discouraged.get(feat, [])
+                if lvls:
+                    parts.append(f"  {feat}: ∈ {lvls}    [confidence: {confidence.get(feat, 'unknown')}]\n")
+        # Interaction rules (top-2 pair only)
+        interactions = arch_prior.get("interaction_rules", []) or []
+        if interactions:
+            parts.append("\n### Interaction priors (top-2 features only)\n")
+            for rule in interactions:
+                pair = rule.get("pair", [])
+                pref_combos = rule.get("preferred_combinations", [])
+                avoid_combos = rule.get("avoid_combinations", [])
+                if pref_combos:
+                    parts.append(f"  preferred {pair}: {pref_combos}\n")
+                if avoid_combos:
+                    parts.append(f"  avoid {pair}: {avoid_combos}\n")
+        # Soft-prior usage guidance
         parts.append(
-            "\nUse this to guide your search: vary the most important features more.\n"
+            "\n### How to use these priors\n"
+            "  - High-confidence preferred → strong push toward those levels\n"
+            "  - Low-confidence preferred → mild bias only; can deviate freely with rationale\n"
+            "  - Discouraged levels → avoid unless strong rationale\n"
+            "  - **If proposing a discouraged level, you MUST include explicit rationale "
+            "in your `rationale` field explaining why this level might work despite "
+            "cross-hospital evidence of negative SHAP contribution.**\n"
         )
+        if arch_prior.get("_caveat"):
+            parts.append(f"\n_(Caveat: {arch_prior['_caveat']})_\n")
 
     # Already tried architectures (only val metrics — no test leakage)
     completed = search_state.get("completed_experiments", [])
@@ -305,12 +350,19 @@ def _build_revision_prompt(context, search_state, rejected_with_critiques, max_p
     if max_flops is not None:
         parts.append(f"Maximum allowed FLOPs: {max_flops:,}\n")
 
-    # SHAP importance
-    shap = context.get("shap_importance", {})
-    if shap:
-        parts.append(f"\n## SHAP Feature Importance\n")
-        for feat, val in sorted(shap.items(), key=lambda x: -x[1]):
-            parts.append(f"  {feat}: {val:.4f}\n")
+    # Layer 2: Architecture Prior (compact, this is revise prompt — keep brief)
+    arch_prior = context.get("meta_regression_prior") or {}
+    if arch_prior:
+        parts.append("\n## Architecture Prior (SOFT directional, from cross-hospital meta-regression)\n")
+        order = arch_prior.get("feature_importance_order", [])
+        if order:
+            parts.append(f"Feature importance: {' > '.join(order)}\n")
+        preferred = arch_prior.get("preferred_levels", {}) or {}
+        discouraged = arch_prior.get("discouraged_levels", {}) or {}
+        if any(preferred.values()):
+            parts.append(f"Preferred levels: {preferred}\n")
+        if any(discouraged.values()):
+            parts.append(f"Discouraged levels: {discouraged}  (avoid unless strong rationale)\n")
 
     # Already tried
     completed = search_state.get("completed_experiments", [])
