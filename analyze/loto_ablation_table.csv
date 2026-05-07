@@ -1,0 +1,6 @@
+task,mas_exact_mean_pct,mas_exact_std_pct,mas_exact_n_seeds,mas_layer1_only_mean_pct,mas_layer1_only_std_pct,mas_layer1_only_n_seeds,mas_loto_mean_pct,mas_loto_std_pct,mas_loto_n_seeds,mas_cold_mean_pct,mas_cold_std_pct,mas_cold_n_seeds,best_baseline_method,best_baseline_mean_pct,best_baseline_std_pct,best_baseline_n_seeds,delta_layer1_only_vs_exact,delta_loto_vs_exact,delta_cold_vs_exact,delta_layer1_only_vs_baseline,delta_loto_vs_baseline,delta_cold_vs_baseline
+Death,80.15,0.0,1,75.54,0.0,1,81.36,0.0,1,77.1,0.0,1,LLMatic,78.01,0.0,1,-4.61,1.21,-3.05,-2.47,3.35,-0.91
+Stay>7d,83.59,0.0,1,82.19,0.0,1,83.59,0.0,1,83.15,0.0,1,CoLLM-NAS,82.86,0.0,1,-1.4,0.0,-0.44,-0.67,0.73,0.29
+Readmit-3M,31.92,0.0,1,32.02,0.0,1,32.11,0.0,1,31.61,0.0,1,CoLLM-NAS,31.79,0.0,1,0.1,0.19,-0.31,0.23,0.32,-0.18
+Pheno-6M,28.14,0.0,1,27.02,0.0,1,28.15,0.0,1,27.24,0.0,1,LLMatic,27.77,0.0,1,-1.12,0.01,-0.9,-0.75,0.38,-0.53
+Pheno-12M,27.76,0.0,1,27.63,0.0,1,27.76,0.0,1,27.01,0.0,1,LLMatic,27.69,0.0,1,-0.13,0.0,-0.75,-0.06,0.07,-0.68

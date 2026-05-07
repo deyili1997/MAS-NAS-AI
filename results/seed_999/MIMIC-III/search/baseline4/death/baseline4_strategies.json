@@ -1,0 +1,21 @@
+{
+  "hospital": "MIMIC-III",
+  "task": "death",
+  "navigator_model": "claude-sonnet-4-6",
+  "generator_model": "claude-sonnet-4-6",
+  "best_arch": {
+    "embed_dim": 128,
+    "depth": 4,
+    "mlp_ratio": 2,
+    "num_heads": 4
+  },
+  "best_val_auprc": 0.7555964438857325,
+  "strategies": [
+    {
+      "iteration": 0,
+      "stage": "init",
+      "strategy": "**Initial Exploration Strategy — Iteration 0**\n\nSince no prior evaluations exist, the priority is to spread candidates broadly across all four dimensions to gather signal about their individual and joint effects on AUPRC. The most impactful dimensions to vary first are `embed_dim` and `depth`, as they dominate parameter count and representational capacity. Sample across all four levels of `embed_dim` (32, 64, 128, 256) and pair them with a range of `depth` values (1, 2, 4, 8), but be cautious with large `embed_dim` × large `depth` combinations that risk hitting the 2M parameter ceiling. For `num_heads`, ensure diversity while respecting the divisibility constraint — for smaller `embed_dim` values (32, 64), prefer fewer heads (1, 2, 4); for larger values (128, 256), also explore 8 heads. `mlp_ratio` should be varied independently across {1, 2, 4, 8} to probe whether wider feed-forward layers help on this clinical task.\n\nAim for roughly uniform coverage in a Latin-hypercube-like fashion: avoid clustering candidates in any single region (e.g., don't over-sample shallow+small or deep+large exclusively). Include at least one \"minimal\" configuration (low embed_dim, shallow depth, small mlp_ratio) as a baseline anchor and at least one near-budget configuration (large embed_dim, moderate-to-high depth) to probe the upper performance frontier. Since MIMIC-III mortality prediction typically benefits from moderate capacity with good regularization, mid-range configurations (embed_dim ∈ {64, 128}, depth ∈ {2, 4}) are likely the most informative region — weight sampling slightly toward these while still covering extremes. This spread will let subsequent iterations identify which dimensions yield the strongest AUPRC gradient.",
+      "results_summary": null
+    }
+  ]
+}

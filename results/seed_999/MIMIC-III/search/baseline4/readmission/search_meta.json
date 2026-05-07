@@ -1,0 +1,14 @@
+{
+  "method": "baseline4",
+  "hospital": "MIMIC-III",
+  "task": "readmission",
+  "seed": 999,
+  "budget": 2,
+  "max_params": 2000000,
+  "navigator_model": "None",
+  "generator_model": "None",
+  "candidates_per_iter": 3,
+  "ckpt_used": "/Users/deyili/Documents_Local/BMI_PhD@UF/Projects/AgentCare/MAS-NAS-Working/MAS-NAS/results/MIMIC-III/checkpoint_mlm/mlm_model.pt",
+  "wall_clock_sec": 65.88212183300129,
+  "llm_calls": 2
+}

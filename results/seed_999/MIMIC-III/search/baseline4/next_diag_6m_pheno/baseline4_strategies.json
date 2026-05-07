@@ -1,0 +1,21 @@
+{
+  "hospital": "MIMIC-III",
+  "task": "next_diag_6m_pheno",
+  "navigator_model": "claude-sonnet-4-6",
+  "generator_model": "claude-sonnet-4-6",
+  "best_arch": {
+    "embed_dim": 128,
+    "depth": 4,
+    "mlp_ratio": 2,
+    "num_heads": 4
+  },
+  "best_val_auprc": 0.26151695656367446,
+  "strategies": [
+    {
+      "iteration": 0,
+      "stage": "init",
+      "strategy": "**Initial Exploration Strategy — Iteration 0**\n\nSince no evaluation history exists yet, the priority is maximal coverage of the search space rather than exploitation of any known-good region. The most impactful dimensions for a multilabel EHR phenotyping task are likely `embed_dim` and `depth`, as they jointly determine representational capacity and the model's ability to capture temporal/co-occurrence patterns across 18 phenotype classes. Start by spanning the full range of `embed_dim` (32 → 256) and `depth` (1 → 8) systematically, ensuring candidates appear at both extremes and the middle. Because the param budget is tight (≤2M), be cautious pairing large `embed_dim` (256) with large `depth` (8) — such combinations risk budget violation — so prioritize those pairings only at moderate `mlp_ratio` (1–2). Conversely, shallow-but-wide and deep-but-narrow configurations should both be represented to distinguish capacity-from-width vs. capacity-from-depth effects.\n\nFor `num_heads` and `mlp_ratio`, treat these as secondary axes in this first round but still vary them meaningfully: include at least one low-head (1–2) and one high-head (4–8) setting at each `embed_dim` level (respecting divisibility), and sample `mlp_ratio` from {1, 2, 4} rather than always defaulting to 4. This avoids conflating head-count effects with embedding size effects. Altogether, aim for roughly 8–12 diverse candidates that tile the (embed_dim × depth) grid, with varied `mlp_ratio` and `num_heads` filling in the remaining dimensions — the goal is to obtain enough signal to identify which axes most strongly drive val AUPRC before narrowing the search in later iterations.",
+      "results_summary": null
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+method,wall_clock_min_mean,wall_clock_min_std,wall_clock_min_total,llm_calls_mean,llm_calls_total,n_runs
+Random,0.7,0.3,3.4,0.0,0,5
+EA,0.7,0.3,3.7,0.0,0,5
+LLM-1shot,0.8,0.3,4.1,2.0,10,5
+LLMatic,0.9,0.4,4.7,3.0,15,5
+CoLLM-NAS,0.9,0.3,4.6,2.0,10,5
+MAS-NAS,1.2,0.3,5.8,4.0,20,5

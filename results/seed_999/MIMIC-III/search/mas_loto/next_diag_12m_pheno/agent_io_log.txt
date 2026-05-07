@@ -1,11 +1,11 @@
 ╔════════════════════════════════════════════════════════════════════════════════╗
 ║  MAS-NAS Agent I/O Runtime Log                                                 ║
-║  Started: 2026-05-06 22:35:14                                                  ║
+║  Started: 2026-05-06 22:46:57                                                  ║
 ╚════════════════════════════════════════════════════════════════════════════════╝
 
 
 ┌────────────────────────────────────────────────────────────────────────────────┐
-│  RUN CONFIGURATION                                                   22:35:14  │
+│  RUN CONFIGURATION                                                   22:46:57  │
 └────────────────────────────────────────────────────────────────────────────────┘
 
   hospital          : MIMIC-III
@@ -20,26 +20,26 @@
   lr                : 0.0001
 
 ┌────────────────────────────────────────────────────────────────────────────────┐
-│  PHASE 0 — HISTORICAL CONTEXT                                        22:35:26  │
+│  PHASE 0 — HISTORICAL CONTEXT                                        22:47:08  │
 └────────────────────────────────────────────────────────────────────────────────┘
 
   Similar hospital  : MIMIC-IV  (similarity = 0.9978)
-  Matched task      : next_diag_12m_pheno
+  Matched task      : next_diag_6m_pheno
   Top-k historical architectures:
     #   embed  depth  mlp  heads       params      Acc       F1    AUROC    AUPRC
-    1     128      4    1      2    1,501,314   0.8473   0.2039   0.6984   0.3709
-    2     128      2    4      2    1,499,522   0.8459   0.2015   0.6955   0.3671
-    3     128      1    1      8    1,202,562   0.8389   0.1804   0.6833   0.3454
-    4      32      4    1      8      301,698   0.8185   0.0100   0.6325   0.2910
-    5      32      2    8      1      317,890   0.8175   0.0002   0.6300   0.2965
+    1     128      4    1      2    1,501,314   0.8482   0.1966   0.7058   0.3613
+    2     128      2    4      2    1,499,522   0.8491   0.1844   0.6913   0.3578
+    3     128      1    1      8    1,202,562   0.8408   0.1475   0.6783   0.3391
+    4      32      4    1      8      301,698   0.8251   0.0043   0.6325   0.2756
+    5      32      2    8      1      317,890   0.8251   0.0013   0.6304   0.2871
   ── Layer 2: Architecture Prior (meta-regression) ──
   feature_importance_order: ['embed_dim', 'depth', 'num_heads', 'mlp_ratio']
   preferred_levels  : {'embed_dim': [128], 'depth': [4], 'mlp_ratio': [1], 'num_heads': [1, 2]}
-  discouraged_levels: {'embed_dim': [32], 'depth': [1, 2], 'mlp_ratio': [4, 8], 'num_heads': [8]}
+  discouraged_levels: {'embed_dim': [32], 'depth': [1], 'mlp_ratio': [4, 8], 'num_heads': [8]}
   confidence        : {'embed_dim': 'high', 'depth': 'high', 'mlp_ratio': 'high', 'num_heads': 'high'}
 
 ┌────────────────────────────────────────────────────────────────────────────────┐
-│  ROUND 1 — AGENT 1: PROPOSAL                                         22:35:26  │
+│  ROUND 1 — AGENT 1: PROPOSAL                                         22:47:08  │
 └────────────────────────────────────────────────────────────────────────────────┘
 
   ── Inputs ──
@@ -48,7 +48,7 @@
   Completed exps    : 0
   Constraints       : max_params=2,000,000  max_flops=None
   ── LLM Call ──
-  [PROMPT] (5,384 chars):
+  [PROMPT] (5,377 chars):
     You are an expert neural architecture search agent for Transformer models applied to longitudinal Electronic Health Record (EHR) data. Your job is to propose architectures that will perform well on the target task.
     ## Search Space
     Available choices: {"mlp_ratio": [1, 2, 4, 8], "num_heads": [1, 2, 4, 8], "embed_dim": [32, 64, 128, 256], "depth": [1, 2, 4, 8]}
@@ -87,51 +87,51 @@
       Finetune_avg_pro_per_patient: 7.52
     
     ## Historical Best Architectures
-    From most similar hospital: MIMIC-IV (similarity=0.9978), task: next_diag_12m_pheno
+    From most similar hospital: MIMIC-IV (similarity=0.9978), task: next_diag_6m_pheno
     
-      Top-1: {"embed_dim": 128, "depth": 4, "mlp_ratio": 1, "num_heads": 2, "num_params": 1501314, "accuracy": 0.8472991385372715, "f1": 0.2038713434091017, "auroc": 0.6984063148734787, "auprc": 0.3708638940746397}
-      Top-2: {"embed_dim": 128, "depth": 2, "mlp_ratio": 4, "num_heads": 2, "num_params": 1499522, "accuracy": 0.8459439463197375, "f1": 0.2014809235497222, "auroc": 0.6955157501760393, "auprc": 0.3670899540318355}
-      Top-3: {"embed_dim": 128, "depth": 1, "mlp_ratio": 1, "num_heads": 8, "num_params": 1202562, "accuracy": 0.8389262482419128, "f1": 0.1803743374524996, "auroc": 0.6832933654557692, "auprc": 0.345446482901609}
-      Top-4: {"embed_dim": 32, "depth": 4, "mlp_ratio": 1, "num_heads": 8, "num_params": 301698, "accuracy": 0.8184518577121426, "f1": 0.0099528098943272, "auroc": 0.6324707648091761, "auprc": 0.2910282049123603}
-      Top-5: {"embed_dim": 32, "depth": 2, "mlp_ratio": 8, "num_heads": 1, "num_params": 317890, "accuracy": 0.8175068858415377, "f1": 0.0002123480384349, "auroc": 0.6299871536824958, "auprc": 0.2965066067353972}
+      Top-1: {"embed_dim": 128, "depth": 4, "mlp_ratio": 1, "num_heads": 2, "num_params": 1501314, "accuracy": 0.8482414359139959, "f1": 0.1966076040992649, "auroc": 0.7057722710104125, "auprc": 0.3613047671266773}
+      Top-2: {"embed_dim": 128, "depth": 2, "mlp_ratio": 4, "num_heads": 2, "num_params": 1499522, "accuracy": 0.8491429186512742, "f1": 0.1843863177168047, "auroc": 0.6913469286512209, "auprc": 0.357781981531331}
+      Top-3: {"embed_dim": 128, "depth": 1, "mlp_ratio": 1, "num_heads": 8, "num_params": 1202562, "accuracy": 0.840782899634922, "f1": 0.1475139408040273, "auroc": 0.6783232811396559, "auprc": 0.3391204350938657}
+      Top-4: {"embed_dim": 32, "depth": 4, "mlp_ratio": 1, "num_heads": 8, "num_params": 301698, "accuracy": 0.8250809540468054, "f1": 0.0042700491700537, "auroc": 0.6325018962222102, "auprc": 0.275558857344867}
+      Top-5: {"embed_dim": 32, "depth": 2, "mlp_ratio": 8, "num_heads": 1, "num_params": 317890, "accuracy": 0.825085439035548, "f1": 0.0012825243373908, "auroc": 0.6303725015121343, "auprc": 0.2871087627688537}
     
     ## Architecture Prior — SOFT statistical guidance, NOT prescriptive rules
     
-    The following levels show stable cross-hospital SHAP signals from a pooled meta-regression across multiple source hospitals. **Treat as directional priors, not hard constraints.** SHAP val
-        ... (truncated, total 5,384 chars)
-  [RESPONSE] (956 chars):
+    The following levels show stable cross-hospital SHAP signals from a pooled meta-regression across multiple source hospitals. **Treat as directional priors, not hard constraints.** SHAP values 
+        ... (truncated, total 5,377 chars)
+  [RESPONSE] (1,009 chars):
     [
       {
         "embed_dim": 128,
         "depth": 4,
         "mlp_ratio": 1,
         "num_heads": 2,
-        "rationale": "Directly mirrors the top-1 architecture from the most similar hospital (MIMIC-IV, similarity=0.9978), which achieved the best AUROC and AUPRC. All four hyperparameters align with the high-confidence preferred levels from the SHAP priors: embed_dim=128, depth=4, mlp_ratio=1, num_heads=2. Strong exploitation of the best known signal."
+        "rationale": "Directly mirrors the top-1 architecture from the highly similar MIMIC-IV hospital (similarity=0.9978), which achieved the best AUROC and AUPRC. Aligns perfectly with all high-confidence SHAP priors: embed_dim=128, depth=4, num_heads=2, mlp_ratio=1. Strong exploitation of the best known configuration for this task and dataset family."
       },
       {
         "embed_dim": 128,
         "depth": 4,
         "mlp_ratio": 1,
         "num_heads": 1,
-        "rationale": "Exploration variant of the top configuration, changing only num_heads from 2 to 1. Both are in the high-confidence preferred set for num_heads. With embed_dim=128 and mlp_ratio=1, this keeps parameter count similar while testing whether fewer heads (less fragmented attention) benefits this relatively small MIMIC-III finetune set (only 2071 samples), where simpler attention patterns may generalize better."
+        "rationale": "Exploration variant of the top configuration, substituting num_heads=1 (also preferred per SHAP priors) while keeping all other hyperparameters at their optimal levels. Single-head attention may capture global EHR patterns more holistically with the relatively small MIMIC-III finetune set (n=2071), and reduces inter-head redundancy. Covers a different region of the search space from the first proposal while staying within high-confidence preferred levels."
       }
     ]
   ── Output: 2 Proposals ──
   Proposals (2):
   [1] embed=128  depth=4  mlp=1  heads=2
-      "Directly mirrors the top-1 architecture from the most similar hospital (MIMIC-IV, similarity=0.9978), which achieved the best AUROC and AUPRC. All four hyperparameters align with the high-confidence p"
+      "Directly mirrors the top-1 architecture from the highly similar MIMIC-IV hospital (similarity=0.9978), which achieved the best AUROC and AUPRC. Aligns perfectly with all high-confidence SHAP priors: e"
   [2] embed=128  depth=4  mlp=1  heads=1
-      "Exploration variant of the top configuration, changing only num_heads from 2 to 1. Both are in the high-confidence preferred set for num_heads. With embed_dim=128 and mlp_ratio=1, this keeps parameter"
+      "Exploration variant of the top configuration, substituting num_heads=1 (also preferred per SHAP priors) while keeping all other hyperparameters at their optimal levels. Single-head attention may captu"
 
 ┌────────────────────────────────────────────────────────────────────────────────┐
-│  ROUND 1 — AGENT 2: CRITIC (pass 1/3)                                22:35:32  │
+│  ROUND 1 — AGENT 2: CRITIC (pass 1/3)                                22:47:14  │
 └────────────────────────────────────────────────────────────────────────────────┘
 
   ── Inputs ──
   Reviewing         : 2 proposals
   Strategy          : exploration
   ── LLM Call ──
-  [PROMPT] (5,960 chars):
+  [PROMPT] (6,007 chars):
     You are an expert architecture critic for Transformer-based NAS on EHR data. Your job is to review proposed architectures and either ACCEPT or REJECT them.
     You do NOT revise proposals yourself — rejected proposals will be sent back to the proposal agent for revision.
     
@@ -142,11 +142,11 @@
     Maximum parameters: 2,000,000
     
     ## Historical Best Architectures (from similar hospital)
-      Top-1: {"embed_dim": 128, "depth": 4, "mlp_ratio": 1, "num_heads": 2, "num_params": 1501314, "accuracy": 0.8472991385372715, "f1": 0.2038713434091017, "auroc": 0.6984063148734787, "auprc": 0.3708638940746397}
-      Top-2: {"embed_dim": 128, "depth": 2, "mlp_ratio": 4, "num_heads": 2, "num_params": 1499522, "accuracy": 0.8459439463197375, "f1": 0.2014809235497222, "auroc": 0.6955157501760393, "auprc": 0.3670899540318355}
-      Top-3: {"embed_dim": 128, "depth": 1, "mlp_ratio": 1, "num_heads": 8, "num_params": 1202562, "accuracy": 0.8389262482419128, "f1": 0.1803743374524996, "auroc": 0.6832933654557692, "auprc": 0.345446482901609}
-      Top-4: {"embed_dim": 32, "depth": 4, "mlp_ratio": 1, "num_heads": 8, "num_params": 301698, "accuracy": 0.8184518577121426, "f1": 0.0099528098943272, "auroc": 0.6324707648091761, "auprc": 0.2910282049123603}
-      Top-5: {"embed_dim": 32, "depth": 2, "mlp_ratio": 8, "num_heads": 1, "num_params": 317890, "accuracy": 0.8175068858415377, "f1": 0.0002123480384349, "auroc": 0.6299871536824958, "auprc": 0.2965066067353972}
+      Top-1: {"embed_dim": 128, "depth": 4, "mlp_ratio": 1, "num_heads": 2, "num_params": 1501314, "accuracy": 0.8482414359139959, "f1": 0.1966076040992649, "auroc": 0.7057722710104125, "auprc": 0.3613047671266773}
+      Top-2: {"embed_dim": 128, "depth": 2, "mlp_ratio": 4, "num_heads": 2, "num_params": 1499522, "accuracy": 0.8491429186512742, "f1": 0.1843863177168047, "auroc": 0.6913469286512209, "auprc": 0.357781981531331}
+      Top-3: {"embed_dim": 128, "depth": 1, "mlp_ratio": 1, "num_heads": 8, "num_params": 1202562, "accuracy": 0.840782899634922, "f1": 0.1475139408040273, "auroc": 0.6783232811396559, "auprc": 0.3391204350938657}
+      Top-4: {"embed_dim": 32, "depth": 4, "mlp_ratio": 1, "num_heads": 8, "num_params": 301698, "accuracy": 0.8250809540468054, "f1": 0.0042700491700537, "auroc": 0.6325018962222102, "auprc": 0.275558857344867}
+      Top-5: {"embed_dim": 32, "depth": 2, "mlp_ratio": 8, "num_heads": 1, "num_params": 317890, "accuracy": 0.825085439035548, "f1": 0.0012825243373908, "auroc": 0.6303725015121343, "auprc": 0.2871087627688537}
     
     ## Architecture Prior (SOFT directional guidance from meta-regression)
     Feature importance: embed_dim > depth > num_heads > mlp_ratio
@@ -157,26 +157,26 @@
       mlp_ratio: [1]    [confidence: high]
     Discouraged levels (negative cross-hospital SHAP):
       embed_dim: [32]    [confidence: high]
-      depth: [1, 2]    [confidence: high]
+      depth: [1]    [confidence: high]
       num_heads: [8]    [confidence: high]
       mlp_ratio: [4, 8]    [confidence: high]
     
     ## Proposals to Review
-      Proposal 0: {"embed_dim": 128, "depth": 4, "mlp_ratio": 1, "num_heads": 2, "rationale": "Directly mirrors the top-1 architecture from the most similar hospital (MIMIC-IV, similarity=0.9978), which achieved the best AUROC and AUPRC. All four hyperparameters align with the high-confidence preferred levels from the SHAP priors: embed_dim=128, depth=4, mlp_ratio=1, num_heads=2. Strong exploitation of the best known signal."}
-      Proposal 1: {"embed_dim": 128, "depth": 4, "mlp_ratio": 1, "num_heads": 1, "rationale": "Exploration variant of the top configuration, changing only num_heads from 2 to 1. Both are in the high-confidence preferred set for num_heads. With embed_dim=128 and mlp_ratio=1, this keeps parameter count similar while testing whether fewer heads (
-        ... (truncated, total 5,960 chars)
-  [RESPONSE] (1,067 chars):
+      Proposal 0: {"embed_dim": 128, "depth": 4, "mlp_ratio": 1, "num_heads": 2, "rationale": "Directly mirrors the top-1 architecture from the highly similar MIMIC-IV hospital (similarity=0.9978), which achieved the best AUROC and AUPRC. Aligns perfectly with all high-confidence SHAP priors: embed_dim=128, depth=4, num_heads=2, mlp_ratio=1. Strong exploitation of the best known configuration for this task and dataset family."}
+      Proposal 1: {"embed_dim": 128, "depth": 4, "mlp_ratio": 1, "num_heads": 1, "rationale": "Exploration variant of the top configuration, substituting num_heads=1 (also preferred per SHAP priors) while keeping all other hyperparameters at their optimal levels. Single-head attention may capture global EHR patterns more holistically with the relat
+        ... (truncated, total 6,007 chars)
+  [RESPONSE] (993 chars):
     [
       {
         "proposal_idx": 0,
         "decision": "reject",
-        "critique": "This is an exact duplicate of the Top-1 historical architecture (embed_dim=128, depth=4, mlp_ratio=1, num_heads=2, which achieved accuracy=0.8472, auroc=0.6984). This violates the HARD constraint against duplicating known Top-k historical architectures. The proposal agent should explore a novel configuration rather than reproducing already-tried evidence.",
+        "critique": "This proposal is an exact duplicate of the Top-1 historical architecture (embed_dim=128, depth=4, mlp_ratio=1, num_heads=2, num_params=1501314). Per HARD constraints, exact duplicates of Top-k historical architectures are auto-rejected since the outcome is already known. The proposal agent should explore a novel configuration rather than replicating known evidence.",
         "risk_tags": ["too_similar"]
       },
       {
         "proposal_idx": 1,
         "decision": "accept",
-        "critique": "Valid configuration: embed_dim=128 is divisible by num_heads=1, parameter count will be within budget (similar to Top-1 ~1.5M), and this is not an exact duplicate of any historical architecture. All hyperparameters align with high-confidence preferred levels (embed_dim=128, depth=4, mlp_ratio=1, num_heads in {1,2}). The rationale for testing num_heads=1 is well-justified given the small dataset size (2071 samples) where simpler attention patterns may generalize better. Good exploration variant.",
+        "critique": "Valid exploration variant: embed_dim=128 is divisible by num_heads=1, all parameters are within preferred SHAP levels (embed_dim=128, depth=4, mlp_ratio=1, num_heads=1), and this specific configuration has not been tried before. The rationale for single-head attention capturing global EHR patterns is reasonable. Good coverage of the preferred region while differing meaningfully from historical top architectures.",
         "risk_tags": []
       }
     ]
@@ -185,20 +185,20 @@
   [1] embed=128  depth=4  mlp=1  heads=1
   Rejected (1):
     [1] embed=128  depth=4  mlp=1  heads=2
-        Critique: "This is an exact duplicate of the Top-1 historical architecture (embed_dim=128, depth=4, mlp_ratio=1, num_heads=2, which achieved accuracy=0.8472, auroc=0.6984). This violates the HARD constraint against duplicating known Top-k historical architectures. The proposal agent should explore a novel conf"
+        Critique: "This proposal is an exact duplicate of the Top-1 historical architecture (embed_dim=128, depth=4, mlp_ratio=1, num_heads=2, num_params=1501314). Per HARD constraints, exact duplicates of Top-k historical architectures are auto-rejected since the outcome is already known. The proposal agent should ex"
         Tags: ['too_similar']
 
 ┌────────────────────────────────────────────────────────────────────────────────┐
-│  ROUND 1 — AGENT 1: REVISE (pass 1)                                  22:35:38  │
+│  ROUND 1 — AGENT 1: REVISE (pass 1)                                  22:47:19  │
 └────────────────────────────────────────────────────────────────────────────────┘
 
   ── Inputs ──
   Critiques to address (1):
     [1] embed=128  depth=4  mlp=1  heads=2
-        Critique: "This is an exact duplicate of the Top-1 historical architecture (embed_dim=128, depth=4, mlp_ratio=1, num_heads=2, which achieved accuracy=0.8472, auroc=0.6984). This violates the HARD constraint against duplicating known Top-k historical architectures. The proposal agent should explore a novel conf"
+        Critique: "This proposal is an exact duplicate of the Top-1 historical architecture (embed_dim=128, depth=4, mlp_ratio=1, num_heads=2, num_params=1501314). Per HARD constraints, exact duplicates of Top-k historical architectures are auto-rejected since the outcome is already known. The proposal agent should ex"
         Tags: ['too_similar']
   ── LLM Call ──
-  [PROMPT] (2,147 chars):
+  [PROMPT] (2,154 chars):
     You are an expert neural architecture search agent for Transformer models applied to longitudinal Electronic Health Record (EHR) data.
     
     Your previous proposals were REJECTED by the critic. You must revise them based on the feedback below.
@@ -212,13 +212,13 @@
     ## Architecture Prior (SOFT directional, from cross-hospital meta-regression)
     Feature importance: embed_dim > depth > num_heads > mlp_ratio
     Preferred levels: {'embed_dim': [128], 'depth': [4], 'mlp_ratio': [1], 'num_heads': [1, 2]}
-    Discouraged levels: {'embed_dim': [32], 'depth': [1, 2], 'mlp_ratio': [4, 8], 'num_heads': [8]}  (avoid unless strong rationale)
+    Discouraged levels: {'embed_dim': [32], 'depth': [1], 'mlp_ratio': [4, 8], 'num_heads': [8]}  (avoid unless strong rationale)
     
     ## Rejected Proposals & Critique Reasons
     
     ### Rejected Proposal 1
       Config: {"embed_dim": 128, "depth": 4, "mlp_ratio": 1, "num_heads": 2}
-      Critique: This is an exact duplicate of the Top-1 historical architecture (embed_dim=128, depth=4, mlp_ratio=1, num_heads=2, which achieved accuracy=0.8472, auroc=0.6984). This violates the HARD constraint against duplicating known Top-k historical architectures. The proposal agent should explore a novel configuration rather than reproducing already-tried evidence.
+      Critique: This proposal is an exact duplicate of the Top-1 historical architecture (embed_dim=128, depth=4, mlp_ratio=1, num_heads=2, num_params=1501314). Per HARD constraints, exact duplicates of Top-k historical architectures are auto-rejected since the outcome is already known. The proposal agent should explore a novel configuration rather than replicating known evidence.
       Risk tags: ['too_similar']
     
     ## Current Search Strategy: exploration
@@ -247,30 +247,30 @@
     ```
     Return ONLY valid JSON, no markdown code fences, no extra text.
     
-  [RESPONSE] (620 chars):
+  [RESPONSE] (531 chars):
     [
       {
         "embed_dim": 128,
         "depth": 4,
         "mlp_ratio": 2,
-        "num_heads": 4,
-        "rationale": "Revised to avoid exact duplicate of the rejected proposal. Keeping preferred embed_dim=128 and depth=4 per architecture prior, but changing num_heads from 2 to 4 (still divisible: 128/4=32) and mlp_ratio from 1 to 2 to explore a different point in the search space. mlp_ratio=2 is neither preferred nor strongly discouraged, and num_heads=4 is a middle ground. This configuration is novel relative to known historical architectures while remaining aligned with the high-importance dimensions (embed_dim, depth)."
+        "num_heads": 2,
+        "rationale": "Revised to address the duplicate rejection. Keeps the high-priority embed_dim=128 and depth=4 per architecture prior, retains num_heads=2 (preferred), but increases mlp_ratio from 1 to 2 to differentiate from the rejected duplicate. mlp_ratio=2 is neither strongly preferred nor discouraged, providing a modest capacity increase while staying well within the 2M parameter budget. embed_dim=128 is divisible by num_heads=2."
       }
     ]
   ── Output: Revised Proposals ──
   Revised (1):
-  [1] embed=128  depth=4  mlp=2  heads=4
-      "Revised to avoid exact duplicate of the rejected proposal. Keeping preferred embed_dim=128 and depth=4 per architecture prior, but changing num_heads from 2 to 4 (still divisible: 128/4=32) and mlp_ra"
+  [1] embed=128  depth=4  mlp=2  heads=2
+      "Revised to address the duplicate rejection. Keeps the high-priority embed_dim=128 and depth=4 per architecture prior, retains num_heads=2 (preferred), but increases mlp_ratio from 1 to 2 to differenti"
 
 ┌────────────────────────────────────────────────────────────────────────────────┐
-│  ROUND 1 — AGENT 2: CRITIC (pass 2/3)                                22:35:42  │
+│  ROUND 1 — AGENT 2: CRITIC (pass 2/3)                                22:47:23  │
 └────────────────────────────────────────────────────────────────────────────────┘
 
   ── Inputs ──
   Reviewing         : 1 proposals
   Strategy          : exploration
   ── LLM Call ──
-  [PROMPT] (5,637 chars):
+  [PROMPT] (5,542 chars):
     You are an expert architecture critic for Transformer-based NAS on EHR data. Your job is to review proposed architectures and either ACCEPT or REJECT them.
     You do NOT revise proposals yourself — rejected proposals will be sent back to the proposal agent for revision.
     
@@ -281,11 +281,11 @@
     Maximum parameters: 2,000,000
     
     ## Historical Best Architectures (from similar hospital)
-      Top-1: {"embed_dim": 128, "depth": 4, "mlp_ratio": 1, "num_heads": 2, "num_params": 1501314, "accuracy": 0.8472991385372715, "f1": 0.2038713434091017, "auroc": 0.6984063148734787, "auprc": 0.3708638940746397}
-      Top-2: {"embed_dim": 128, "depth": 2, "mlp_ratio": 4, "num_heads": 2, "num_params": 1499522, "accuracy": 0.8459439463197375, "f1": 0.2014809235497222, "auroc": 0.6955157501760393, "auprc": 0.3670899540318355}
-      Top-3: {"embed_dim": 128, "depth": 1, "mlp_ratio": 1, "num_heads": 8, "num_params": 1202562, "accuracy": 0.8389262482419128, "f1": 0.1803743374524996, "auroc": 0.6832933654557692, "auprc": 0.345446482901609}
-      Top-4: {"embed_dim": 32, "depth": 4, "mlp_ratio": 1, "num_heads": 8, "num_params": 301698, "accuracy": 0.8184518577121426, "f1": 0.0099528098943272, "auroc": 0.6324707648091761, "auprc": 0.2910282049123603}
-      Top-5: {"embed_dim": 32, "depth": 2, "mlp_ratio": 8, "num_heads": 1, "num_params": 317890, "accuracy": 0.8175068858415377, "f1": 0.0002123480384349, "auroc": 0.6299871536824958, "auprc": 0.2965066067353972}
+      Top-1: {"embed_dim": 128, "depth": 4, "mlp_ratio": 1, "num_heads": 2, "num_params": 1501314, "accuracy": 0.8482414359139959, "f1": 0.1966076040992649, "auroc": 0.7057722710104125, "auprc": 0.3613047671266773}
+      Top-2: {"embed_dim": 128, "depth": 2, "mlp_ratio": 4, "num_heads": 2, "num_params": 1499522, "accuracy": 0.8491429186512742, "f1": 0.1843863177168047, "auroc": 0.6913469286512209, "auprc": 0.357781981531331}
+      Top-3: {"embed_dim": 128, "depth": 1, "mlp_ratio": 1, "num_heads": 8, "num_params": 1202562, "accuracy": 0.840782899634922, "f1": 0.1475139408040273, "auroc": 0.6783232811396559, "auprc": 0.3391204350938657}
+      Top-4: {"embed_dim": 32, "depth": 4, "mlp_ratio": 1, "num_heads": 8, "num_params": 301698, "accuracy": 0.8250809540468054, "f1": 0.0042700491700537, "auroc": 0.6325018962222102, "auprc": 0.275558857344867}
+      Top-5: {"embed_dim": 32, "depth": 2, "mlp_ratio": 8, "num_heads": 1, "num_params": 317890, "accuracy": 0.825085439035548, "f1": 0.0012825243373908, "auroc": 0.6303725015121343, "auprc": 0.2871087627688537}
     
     ## Architecture Prior (SOFT directional guidance from meta-regression)
     Feature importance: embed_dim > depth > num_heads > mlp_ratio
@@ -296,35 +296,35 @@
       mlp_ratio: [1]    [confidence: high]
     Discouraged levels (negative cross-hospital SHAP):
       embed_dim: [32]    [confidence: high]
-      depth: [1, 2]    [confidence: high]
+      depth: [1]    [confidence: high]
       num_heads: [8]    [confidence: high]
       mlp_ratio: [4, 8]    [confidence: high]
     
     ## Proposals to Review
-      Proposal 0: {"embed_dim": 128, "depth": 4, "mlp_ratio": 2, "num_heads": 4, "rationale": "Revised to avoid exact duplicate of the rejected proposal. Keeping preferred embed_dim=128 and depth=4 per architecture prior, but changing num_heads from 2 to 4 (still divisible: 128/4=32) and mlp_ratio from 1 to 2 to explore a different point in the search space. mlp_ratio=2 is neither preferred nor strongly discouraged, and num_heads=4 is a middle ground. This configuration is novel relative to known historical architectures while remaining aligned with the high-importance dimensions (embed_dim, depth)."}
+      Proposal 0: {"embed_dim": 128, "depth": 4, "mlp_ratio": 2, "num_heads": 2, "rationale": "Revised to address the duplicate rejection. Keeps the high-priority embed_dim=128 and depth=4 per architecture prior, retains num_heads=2 (preferred), but increases mlp_ratio from 1 to 2 to differentiate from the rejected duplicate. mlp_ratio=2 is neither strongly preferred nor discouraged, providing a modest capacity increase while staying well within the 2M parameter budget. embed_dim=128 is divisible by num_heads=2."}
     
     ## Current Search Strategy: exploration
     Rationale: initial round
     
     Adjust your review criteria based on the strategy:
-    - During "exploration": be more tolerant of p
-        ... (truncated, total 5,637 chars)
-  [RESPONSE] (685 chars):
+    - During "exploration": be more tolerant of proposals that differ from historical best architectures. Prioritize diversity and coverage of t
+        ... (truncated, total 5,542 chars)
+  [RESPONSE] (511 chars):
     [
       {
         "proposal_idx": 0,
         "decision": "accept",
-        "critique": "Valid configuration: embed_dim=128 is divisible by num_heads=4 (128/4=32), no hard constraint violations, not a duplicate of any historical architecture. embed_dim=128 and depth=4 align with the highest-confidence preferred levels. mlp_ratio=2 is neither preferred nor strongly discouraged, and num_heads=4 is a neutral middle ground not in the discouraged set. The rationale adequately justifies the deviation from the preferred num_heads=[1,2] as exploring a novel point while anchoring the high-importance dimensions. During exploration phase, this level of diversity is acceptable.",
+        "critique": "Proposal uses embed_dim=128, depth=4, num_heads=2 (all preferred levels) with mlp_ratio=2 (neutral, neither preferred nor discouraged). This is a valid differentiation from the historical Top-1 (mlp_ratio=1) and is not an exact duplicate of any tried architecture. Parameter count should be well within budget. The rationale is clear and justified. Exploration strategy supports accepting this modest deviation.",
         "risk_tags": []
       }
     ]
   ── Output ──
   Accepted (1):
-  [1] embed=128  depth=4  mlp=2  heads=4
+  [1] embed=128  depth=4  mlp=2  heads=2
   Rejected: (none)
 
 ┌────────────────────────────────────────────────────────────────────────────────┐
-│  ROUND 1 — AGENT 3a: EXPERIMENT                                      22:35:46  │
+│  ROUND 1 — AGENT 3a: EXPERIMENT                                      22:47:29  │
 └────────────────────────────────────────────────────────────────────────────────┘
 
   ── Inputs ──
@@ -334,12 +334,12 @@
   New experiment results:
     #   embed  depth  mlp  heads       params        FLOPs      Acc       F1    AUROC    AUPRC
     1     128      4    1      1    1,562,737  939,524,608   0.7750   0.0320   0.5807   0.2901
-    2     128      4    2      4    1,694,321  1,073,742,336   0.7727   0.0135   0.5594   0.2768
+    2     128      4    2      2    1,694,321  1,073,742,336   0.7735   0.0246   0.5691   0.2824
   Budget remaining  : 0
   Current best      : embed=128  depth=4  mlp=1  heads=1 (avg_rank=?)
 
 ┌────────────────────────────────────────────────────────────────────────────────┐
-│  FINAL TEST EVALUATION                                               22:36:06  │
+│  FINAL TEST EVALUATION                                               22:47:48  │
 └────────────────────────────────────────────────────────────────────────────────┘
 
   Best architecture : embed=128  depth=4  mlp=1  heads=1  (params=1,562,737)
@@ -350,5 +350,5 @@
   AUPRC             : 0.2776
 
 ╔════════════════════════════════════════════════════════════════════════════════╗
-║  Finished: 2026-05-06 22:36:06                                                 ║
+║  Finished: 2026-05-06 22:47:48                                                 ║
 ╚════════════════════════════════════════════════════════════════════════════════╝

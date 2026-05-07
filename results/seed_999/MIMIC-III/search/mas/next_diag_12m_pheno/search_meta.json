@@ -1,0 +1,11 @@
+{
+  "method": "mas",
+  "hospital": "MIMIC-III",
+  "task": "next_diag_12m_pheno",
+  "seed": 999,
+  "budget": 2,
+  "max_params": 2000000,
+  "ckpt_used": "/Users/deyili/Documents_Local/BMI_PhD@UF/Projects/AgentCare/MAS-NAS-Working/MAS-NAS/results/MIMIC-III/checkpoint_mlm/mlm_model.pt",
+  "wall_clock_sec": 52.13712524999937,
+  "llm_calls": 4
+}

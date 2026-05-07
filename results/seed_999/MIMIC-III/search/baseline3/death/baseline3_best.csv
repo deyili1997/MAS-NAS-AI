@@ -1,0 +1,2 @@
+embed_dim,depth,mlp_ratio,num_heads,num_params,flops,val_accuracy,val_f1,val_auroc,val_auprc,operator,prompt_idx,temperature,iteration,hospital,task,avg_rank,test_accuracy,test_f1,test_auroc,test_auprc
+128,4,4,4,1955425,1342177792,0.822205551387847,0.6934023285899095,0.8615318221232582,0.7458233151389356,init/cold,10,0.7,1,MIMIC-III,death,1.0,0.8275967569221355,0.7183204198950263,0.8730148118659349,0.7800830220490936

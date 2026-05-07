@@ -1,0 +1,21 @@
+{
+  "hospital": "MIMIC-III",
+  "task": "readmission",
+  "navigator_model": "claude-sonnet-4-6",
+  "generator_model": "claude-sonnet-4-6",
+  "best_arch": {
+    "embed_dim": 128,
+    "depth": 4,
+    "mlp_ratio": 2,
+    "num_heads": 4
+  },
+  "best_val_auprc": 0.32381324703593795,
+  "strategies": [
+    {
+      "iteration": 0,
+      "stage": "init",
+      "strategy": "**Initial Exploration Strategy — Iteration 0**\n\nSince no prior evaluations exist, the priority is to maximize coverage across all four dimensions simultaneously rather than optimizing any single axis. The most impactful dimensions to vary first are `embed_dim` and `depth`, as they jointly dominate parameter count and representational capacity — sweeping from small (embed_dim=32, depth=1) to medium (embed_dim=128, depth=4) to larger (embed_dim=256, depth=2) configurations will reveal whether the readmission task benefits more from wider embeddings or deeper stacking, while staying within the 2M parameter budget. `num_heads` should be varied in tandem with `embed_dim` (respecting divisibility), testing both low-head (1–2) and high-head (4–8) regimes to probe whether multi-head attention granularity matters for EHR tabular-temporal structure. `mlp_ratio` should be sampled across its full range (1, 2, 4, 8) but treated as a secondary axis — pair low mlp_ratio with larger embed_dim/depth to avoid budget overflow, and allow higher mlp_ratio only with shallower or narrower configs.\n\nAim for candidates that form a rough Latin hypercube over the joint space: avoid clustering all samples near any single corner (e.g., all small or all large). Deliberately include at least one very lightweight config (low embed_dim, depth=1, small mlp_ratio) as a baseline anchor, one mid-range config near the center of the space, and one near the parameter budget ceiling. This spread ensures the first batch of AUPRC signals will reveal the sensitivity landscape across all dimensions, enabling the next iteration to shift from exploration toward targeted exploitation in the most promising subregions.",
+      "results_summary": null
+    }
+  ]
+}

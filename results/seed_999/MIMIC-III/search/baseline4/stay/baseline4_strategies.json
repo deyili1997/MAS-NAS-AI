@@ -1,0 +1,21 @@
+{
+  "hospital": "MIMIC-III",
+  "task": "stay",
+  "navigator_model": "claude-sonnet-4-6",
+  "generator_model": "claude-sonnet-4-6",
+  "best_arch": {
+    "embed_dim": 128,
+    "depth": 4,
+    "mlp_ratio": 4,
+    "num_heads": 4
+  },
+  "best_val_auprc": 0.8279046328078881,
+  "strategies": [
+    {
+      "iteration": 0,
+      "stage": "init",
+      "strategy": "**Initial Exploration Strategy — Iteration 0**\n\nSince no prior evaluations exist, the primary goal is to spread candidates across the full search space to gather signal on how each dimension independently and jointly affects AUPRC on MIMIC-III stay prediction. Prioritize varying `embed_dim` and `depth` as the dominant drivers of both model capacity and parameter count — these two dimensions define the broad \"size\" of the architecture and are most likely to reveal capacity vs. overfitting trade-offs on EHR data, which tends to be tabular-sequential and moderately sized. Sample across all four levels of `embed_dim` (32, 64, 128, 256) and pair them with diverse `depth` values (1, 2, 4, 8) to capture both shallow-wide and deep-narrow regimes. Ensure the parameter budget constraint is respected, as deeper + wider combinations (e.g., depth=8, embed_dim=256) may exceed 2M parameters and should be avoided or flagged.\n\nSecondarily, vary `mlp_ratio` and `num_heads` to cover low, medium, and high settings, but treat them as secondary sweep axes in this iteration — their interaction with `embed_dim` is constrained by the divisibility rule, so prefer `num_heads` values that cleanly divide several `embed_dim` options (e.g., 1, 2, 4) to maximize coverage. Include at least one candidate with high `mlp_ratio` (4 or 8) paired with moderate depth to probe whether feed-forward expansion helps on this task, and at least one minimal configuration (small `embed_dim`, depth=1) as a low-capacity baseline anchor. The goal is a diverse frontier of ~8–12 candidates that populates all four corners of the capacity spectrum, enabling the next iteration to identify promising subregions for exploitation.",
+      "results_summary": null
+    }
+  ]
+}

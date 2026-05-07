@@ -18,7 +18,7 @@
 #   [Stage E] aggregate + plot all figures + tables
 #               outputs to analyze/ : main_table, efficiency_table, supp_table,
 #               significance, arch_table, cost_table, loto_ablation_table,
-#               figure1_search_trajectory.png, figure2_pareto.png,
+#               figure1_search_trajectory_val_auprc.png, figure2_pareto.png,
 #               figure5_loto_robustness.png
 #
 # Estimated time on Mac MPS (M-series):
@@ -124,7 +124,9 @@ if [ "$CLEAN_ONLY" = true ]; then
     ok "removed results/seed_${SMOKE_SEED}/"
     # Stage E artifacts (only the per-hospital ones for this target)
     rm -f "${ANALYZE_DIR}"/{main_table,efficiency_table,supp_table,significance,arch_table,cost_table,loto_ablation_table}.csv
-    rm -f "${ANALYZE_DIR}"/figure{1_search_trajectory,2_pareto,5_loto_robustness}.png
+    rm -f "${ANALYZE_DIR}"/figure1_search_trajectory_*.png \
+          "${ANALYZE_DIR}"/figure2_pareto.png \
+          "${ANALYZE_DIR}"/figure5_loto_robustness.png
     ok "removed analyze/*.csv, analyze/figure*.png"
     ok "preserved results/${SOURCE_HOSPITAL}/ (prior source)"
     exit 0
@@ -354,12 +356,13 @@ if [ "$RUN_ANALYZE" = true ]; then
         check_file "${ANALYZE_DIR}/${csv}.csv"
     done
 
-    step "E.2  plot_search_trajectory.py — Fig 1"
+    step "E.2  plot_search_trajectory.py — Fig 1 (default metric val_auprc)"
     $PY analyze/plot_search_trajectory.py \
         --results_root "${RESULTS_ROOT}" \
         --hospital ${TARGET_HOSPITAL} \
         --out_dir "${ANALYZE_DIR}"
-    check_file "${ANALYZE_DIR}/figure1_search_trajectory.png"
+    # Note: filename includes metric suffix (figure1_search_trajectory_<metric>.png)
+    check_file "${ANALYZE_DIR}/figure1_search_trajectory_val_auprc.png"
 
     step "E.3  plot_pareto.py — Fig 2"
     $PY analyze/plot_pareto.py \

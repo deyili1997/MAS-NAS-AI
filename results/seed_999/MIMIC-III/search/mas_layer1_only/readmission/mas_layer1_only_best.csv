@@ -1,0 +1,2 @@
+embed_dim,depth,mlp_ratio,num_heads,num_params,flops,val_accuracy,val_f1,val_auroc,val_auprc,iteration,hospital,task,avg_rank,test_accuracy,test_f1,test_auroc,test_auprc
+128,1,2,4,1294817,268435968,0.8036009002250563,0.15928066795118817,0.6959703516760719,0.32762744536611127,1,MIMIC-III,readmission,1.25,0.8162765794707052,0.17115251897860592,0.6883105532102557,0.3201569548629621

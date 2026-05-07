@@ -1,0 +1,3 @@
+embed_dim,depth,mlp_ratio,num_heads,num_params,flops,val_accuracy,val_f1,val_auroc,val_auprc,iteration,hospital,task,avg_rank
+128,4,2,4,1694321,1073742336,0.7803660565723793,0.009177894942394065,0.5506687937725604,0.26151695656367446,2,MIMIC-III,next_diag_6m_pheno,1.0
+32,8,4,2,393009,1275068544,0.7800887409872435,0.0,0.5402790349093908,0.25848942362525146,1,MIMIC-III,next_diag_6m_pheno,2.0
