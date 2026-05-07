@@ -1,2 +1,2 @@
 task,importance_rank,mean_abs_shap_embed_dim,mean_abs_shap_depth,mean_abs_shap_mlp_ratio,mean_abs_shap_num_heads
-death,"embed_dim,depth,mlp_ratio,num_heads",4.55405867,1.10453708775,0.48902358029999987,0.45896680194999995
+death,"embed_dim,depth,num_heads,mlp_ratio",1.16214119,0.243113392,0.00266739374,0.0689707874

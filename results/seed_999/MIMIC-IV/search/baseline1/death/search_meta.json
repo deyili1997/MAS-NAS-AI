@@ -1,0 +1,11 @@
+{
+  "method": "baseline1",
+  "hospital": "MIMIC-IV",
+  "task": "death",
+  "seed": 999,
+  "budget": 2,
+  "max_params": 2000000,
+  "ckpt_used": "/Users/deyili/Documents_Local/BMI_PhD@UF/Projects/AgentCare/MAS-NAS-Working/MAS-NAS/results/MIMIC-IV/checkpoint_mlm/mlm_model.pt",
+  "wall_clock_sec": 107.36915058299928,
+  "llm_calls": 0
+}

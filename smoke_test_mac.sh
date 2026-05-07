@@ -1,19 +1,22 @@
 #!/bin/bash
 # ============================================================================
-# Full systematic Mac smoke test — covers entire pipeline from supernet train
-# to mas_search 4 ablation modes.
+# Full systematic Mac smoke test — covers entire pipeline end-to-end.
 #
 # Pipeline stages:
 #   [Stage 0] run_pipeline.py     (reduced scale: pretrain 3 ep, finetune 3 ep, 5 archs)
 #   [Stage A] shap_analysis.py    (per-task pooled SHAP + Fig 4 PNGs)
 #   [Stage A] run_meta_regression (Layer 2 architecture_prior.json)
 #   [Stage B] mas_search.py × 4 modes (mas / mas_layer1_only / mas_loto / mas_cold, budget=2 each)
+#   [Stage C] baselines 0-4 × budget=2 each (5 baselines: Random, EA, LLM-1shot, LLMatic, CoLLM-NAS)
+#   [Stage D] run_regression.py   (k=3 archs, traditional vs AutoFormer pipeline comparison)
 #
 # Time on Mac MPS (M-series chip):
 #   - Stage 0 (run_pipeline reduced):  ~90 min
 #   - Stage A:                         ~1 min
 #   - Stage B (4 modes × budget=2):    ~40-60 min
-#   - Total full smoke:                ~2.5 hours
+#   - Stage C (5 baselines × budget=2):~25-35 min
+#   - Stage D (regression k=3):        ~15-20 min
+#   - Total full smoke:                ~3-3.5 hours
 #
 # Backup/restore:
 #   Stage 0 overwrites results/MIMIC-IV/{metadata.csv, checkpoint_mlm/mlm_model.pt}.
@@ -21,10 +24,13 @@
 #   Use --restore to restore originals after smoke.
 #
 # Usage:
-#   bash smoke_test_mac.sh                  # FULL (Stage 0+A+B), ~2 hours
-#   bash smoke_test_mac.sh --no-pipeline    # Skip Stage 0 (uses existing artifacts), ~30-45 min
+#   bash smoke_test_mac.sh                  # FULL (Stage 0+A+B+C+D), ~3-3.5 hours
+#   bash smoke_test_mac.sh --no-pipeline    # Skip Stage 0 (uses existing artifacts), ~80-115 min
 #   bash smoke_test_mac.sh --stage-a-only   # Only Stage A (shap + meta_regression), ~1 min
-#   bash smoke_test_mac.sh --wiring-only    # Only Layer 2 wiring check (no mas_search run), ~5 sec
+#   bash smoke_test_mac.sh --wiring-only    # Only Layer 2 wiring check (no model runs), ~5 sec
+#   bash smoke_test_mac.sh --mas-only       # Stages A+B (mas_search 4 modes, no baselines/regression)
+#   bash smoke_test_mac.sh --baselines-only # Stage C only (assumes Stage 0 ckpt already exists)
+#   bash smoke_test_mac.sh --regression-only # Stage D only
 #   bash smoke_test_mac.sh --restore        # Restore originals from .smoke_backup/
 #   bash smoke_test_mac.sh --clean          # Remove smoke artifacts + restore originals
 # ============================================================================
@@ -57,17 +63,22 @@ BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
 RUN_PIPELINE=true
 RUN_STAGE_A=true
 RUN_MAS=true
+RUN_BASELINES=true
+RUN_REGRESSION=true
 WIRING_ONLY=false
 CLEAN_ONLY=false
 RESTORE_ONLY=false
 for arg in "$@"; do
     case "$arg" in
-        --no-pipeline)  RUN_PIPELINE=false ;;
-        --stage-a-only) RUN_PIPELINE=false; RUN_MAS=false ;;
-        --wiring-only)  RUN_PIPELINE=false; RUN_STAGE_A=false; RUN_MAS=false; WIRING_ONLY=true ;;
-        --clean)        CLEAN_ONLY=true ;;
-        --restore)      RESTORE_ONLY=true ;;
-        --help|-h)      grep '^#' "$0" | head -45; exit 0 ;;
+        --no-pipeline)      RUN_PIPELINE=false ;;
+        --stage-a-only)     RUN_PIPELINE=false; RUN_MAS=false; RUN_BASELINES=false; RUN_REGRESSION=false ;;
+        --wiring-only)      RUN_PIPELINE=false; RUN_STAGE_A=false; RUN_MAS=false; RUN_BASELINES=false; RUN_REGRESSION=false; WIRING_ONLY=true ;;
+        --mas-only)         RUN_PIPELINE=false; RUN_BASELINES=false; RUN_REGRESSION=false ;;
+        --baselines-only)   RUN_PIPELINE=false; RUN_STAGE_A=false; RUN_MAS=false; RUN_REGRESSION=false ;;
+        --regression-only)  RUN_PIPELINE=false; RUN_STAGE_A=false; RUN_MAS=false; RUN_BASELINES=false ;;
+        --clean)            CLEAN_ONLY=true ;;
+        --restore)          RESTORE_ONLY=true ;;
+        --help|-h)          grep '^#' "$0" | head -50; exit 0 ;;
     esac
 done
 
@@ -116,6 +127,13 @@ if [ "$CLEAN_ONLY" = true ]; then
             "${RESULTS_ROOT}/${HOSPITAL}/checkpoint_mlm/mlm_model.pt" && ok "restored mlm_model.pt"
         [ -f "${BACKUP_DIR}/metadata.csv" ] && cp -f "${BACKUP_DIR}/metadata.csv" \
             "${RESULTS_ROOT}/${HOSPITAL}/metadata.csv" && ok "restored metadata.csv"
+        # Restore Stage D regression artifacts (smoke version overwrites them in place)
+        if [ -d "${BACKUP_DIR}/regression_${SMOKE_TASK}" ]; then
+            rm -rf "${RESULTS_ROOT}/${HOSPITAL}/regression/${SMOKE_TASK}"
+            cp -R "${BACKUP_DIR}/regression_${SMOKE_TASK}" \
+                "${RESULTS_ROOT}/${HOSPITAL}/regression/${SMOKE_TASK}" \
+                && ok "restored regression/${SMOKE_TASK}/"
+        fi
         rm -rf "${BACKUP_DIR}" && ok "removed .smoke_backup/"
     fi
     exit 0
@@ -377,10 +395,11 @@ if [ "$RUN_MAS" = true ]; then
     grep -q "## Architecture Prior" "${DIR_B2}/agent_io_log.txt" \
         && fail "mas_layer1_only should NOT have '## Architecture Prior' (Layer 2 should be OFF)" \
         || ok "Layer 2 correctly OFF in mas_layer1_only (no '## Architecture Prior' header)"
-    # Layer 1 ON → 'Top-k Historical' / 'Most similar hospital' must still render
-    grep -q "Most similar hospital" "${DIR_B2}/agent_io_log.txt" \
-        && ok "Layer 1 still active in mas_layer1_only (Most similar hospital logged)" \
-        || fail "Layer 1 missing in mas_layer1_only"
+    # Layer 1 ON → tracer.log_kv("Similar hospital", "<name>  (similarity = X)")
+    # When Layer 1 is OFF (mas_cold), the value is "N/A" with no "similarity = " text.
+    grep -qE "Similar hospital +: .*similarity = " "${DIR_B2}/agent_io_log.txt" \
+        && ok "Layer 1 still active in mas_layer1_only (similar-hospital match logged)" \
+        || fail "Layer 1 missing in mas_layer1_only (no 'similarity = ' in agent_io_log)"
 
     step "B.3  mas_loto (Layer 1 task fallback + Layer 2 unchanged)"
     $PY mas_search.py \
@@ -416,7 +435,80 @@ if [ "$RUN_MAS" = true ]; then
         && fail "mas_cold should NOT have '## Architecture Prior' header (Layer 2 should be OFF)" \
         || ok "Layer 2 correctly disabled in mas_cold (no '## Architecture Prior' header rendered)"
 
-    ok "Stage B complete (3/3 modes)"
+    ok "Stage B complete (4/4 modes)"
+fi
+
+# ============================================================================
+# STAGE C — Baselines 0-4 (Random / EA / LLM-1shot / LLMatic / CoLLM-NAS)
+# ============================================================================
+# All 5 baselines share the warm pretrain ckpt at <history_root>/<hospital>/checkpoint_mlm/.
+# We don't pass --ckpt_path explicitly; baselines auto-detect via --results_dir layout.
+# The seeded output goes to ${SEED_OUTPUT}/<hospital>/search/baseline<N>/<task>/.
+if [ "$RUN_BASELINES" = true ]; then
+    section "STAGE C — Baselines 0-4 (5 methods × budget=2 on ${SMOKE_TASK})"
+
+    CKPT_PATH="${RESULTS_ROOT}/${HOSPITAL}/checkpoint_mlm/mlm_model.pt"
+    if [ ! -f "${CKPT_PATH}" ]; then
+        fail "Pretrain checkpoint missing: ${CKPT_PATH}. Run Stage 0 (full smoke) first."
+    fi
+    ok "Reusing warm checkpoint: ${CKPT_PATH}"
+
+    BASELINE_NAMES=("Random" "EA" "LLM-1shot" "LLMatic" "CoLLM-NAS")
+    for i in 0 1 2 3 4; do
+        bname=${BASELINE_NAMES[$i]}
+        step "C.$((i+1))  baseline${i} (${bname})"
+        $PY baselines/baseline${i}.py \
+            --hospital ${HOSPITAL} --task ${SMOKE_TASK} --max_params 2000000 \
+            --budget 2 --seed ${SMOKE_SEED} --num_workers 0 \
+            --ckpt_path "${CKPT_PATH}" \
+            --finetune_epochs ${SMOKE_FINETUNE_EPOCHS} \
+            --finetune_patience ${SMOKE_FINETUNE_PATIENCE} \
+            --top_k_epochs 1 \
+            --results_dir "${SEED_OUTPUT}"
+
+        DIR_C="${SEED_OUTPUT}/${HOSPITAL}/search/baseline${i}/${SMOKE_TASK}"
+        # Output naming: baselines emit <baseline>_search.csv + <baseline>_best.csv
+        check_file "${DIR_C}/baseline${i}_search.csv"
+        check_file "${DIR_C}/baseline${i}_best.csv"
+        ok "baseline${i} (${bname}) complete"
+    done
+
+    ok "Stage C complete (5/5 baselines)"
+fi
+
+# ============================================================================
+# STAGE D — run_regression.py (Traditional vs AutoFormer pipeline comparison, Fig 3)
+# ============================================================================
+# Uses --k=3 random architectures (smoke), reduced epochs. Outputs to
+# results/<hospital>/regression/<task>/{regression_panel.png, ...csv}.
+# This validates the Fig 3 dual-pipeline scatter plot path.
+if [ "$RUN_REGRESSION" = true ]; then
+    section "STAGE D — run_regression.py (k=3 archs, ${SMOKE_TASK} only)"
+
+    # Backup existing regression artifacts (full-scale outputs from prior runs)
+    REG_DIR="${RESULTS_ROOT}/${HOSPITAL}/regression/${SMOKE_TASK}"
+    REG_BACKUP="${BACKUP_DIR}/regression_${SMOKE_TASK}"
+    if [ -d "${REG_DIR}" ]; then
+        mkdir -p "${BACKUP_DIR}"
+        rm -rf "${REG_BACKUP}"
+        cp -R "${REG_DIR}" "${REG_BACKUP}" && ok "backed up regression/${SMOKE_TASK} → ${REG_BACKUP}"
+    fi
+
+    step "D.1  run_regression.py --k 3 --task ${SMOKE_TASK}"
+    $PY run_regression.py \
+        --hospital ${HOSPITAL} --task ${SMOKE_TASK} --k 3 \
+        --pretrain_epochs ${SMOKE_PRETRAIN_EPOCHS} \
+        --pretrain_patience ${SMOKE_PRETRAIN_PATIENCE} \
+        --finetune_epochs ${SMOKE_FINETUNE_EPOCHS} \
+        --finetune_patience ${SMOKE_FINETUNE_PATIENCE} \
+        --top_k_epochs 1 \
+        --seed ${SMOKE_SEED} --num_workers 0 \
+        --results_dir "${RESULTS_ROOT}"
+
+    check_file "${REG_DIR}/regression_panel.png"
+    ok "regression_panel.png generated (Fig 3 path verified)"
+
+    ok "Stage D complete"
 fi
 
 # ============================================================================
@@ -430,16 +522,25 @@ echo "Outputs summary:"
 [ -d "${RESULTS_ROOT}/meta_regression" ] && \
     echo "  Stage A architecture_prior.json:  $(ls ${RESULTS_ROOT}/meta_regression/*/architecture_prior.json 2>/dev/null | wc -l | xargs) files"
 if [ -d "${SEED_OUTPUT}" ]; then
-    echo "  Stage B (smoke seed_${SMOKE_SEED}):"
+    echo "  Stage B (mas_search) outputs (seed_${SMOKE_SEED}):"
     for mode in mas mas_layer1_only mas_loto mas_cold; do
         n=$(ls "${SEED_OUTPUT}/${HOSPITAL}/search/${mode}/${SMOKE_TASK}/" 2>/dev/null | wc -l | xargs)
         [ "$n" -gt 0 ] && echo "    ${mode}: ${n} files"
     done
+    echo "  Stage C (baselines) outputs (seed_${SMOKE_SEED}):"
+    for i in 0 1 2 3 4; do
+        n=$(ls "${SEED_OUTPUT}/${HOSPITAL}/search/baseline${i}/${SMOKE_TASK}/" 2>/dev/null | wc -l | xargs)
+        [ "$n" -gt 0 ] && echo "    baseline${i}: ${n} files"
+    done
+fi
+if [ -f "${RESULTS_ROOT}/${HOSPITAL}/regression/${SMOKE_TASK}/regression_panel.png" ]; then
+    echo "  Stage D (regression):"
+    echo "    regression_panel.png: ${RESULTS_ROOT}/${HOSPITAL}/regression/${SMOKE_TASK}/regression_panel.png"
 fi
 
 echo ""
 if [ -d "${BACKUP_DIR}" ]; then
-    echo "⚠ Smoke modified results/${HOSPITAL}/{metadata.csv, checkpoint_mlm/mlm_model.pt}."
+    echo "⚠ Smoke modified results/${HOSPITAL}/{metadata.csv, checkpoint_mlm/mlm_model.pt, regression/${SMOKE_TASK}/}."
     echo "  Originals are backed up at ${BACKUP_DIR}/"
     echo "  To restore: bash $0 --restore"
 fi

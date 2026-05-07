@@ -1,0 +1,21 @@
+{
+  "hospital": "MIMIC-IV",
+  "task": "death",
+  "navigator_model": "claude-sonnet-4-6",
+  "generator_model": "claude-sonnet-4-6",
+  "best_arch": {
+    "embed_dim": 128,
+    "depth": 2,
+    "mlp_ratio": 4,
+    "num_heads": 8
+  },
+  "best_val_auprc": 0.76790509791403,
+  "strategies": [
+    {
+      "iteration": 0,
+      "stage": "init",
+      "strategy": "**Initial Exploration Strategy — Iteration 0**\n\nSince no evaluations exist yet, the priority is to maximally cover the search space rather than exploit any particular region. The most impactful dimensions to vary first are `embed_dim` and `depth`, as they jointly dominate parameter count and representational capacity. We should sample across all four levels of `embed_dim` (32, 64, 128, 256) and pair them with a spread of `depth` values (1, 2, 4, 8), being mindful that large `embed_dim` × large `depth` combinations (e.g., 256×8) are likely to breach the 2M parameter budget and should be deprioritized or avoided. For `num_heads`, ensure divisibility with `embed_dim` and vary it across legal values at each embed level — for example, smaller embed dims naturally restrict head choices, which is useful signal in itself. `mlp_ratio` should also be varied (try 1, 2, 4, and 8) but treat it as a secondary axis; pair mid-range mlp_ratio values with extreme embed/depth settings to avoid compounding budget violations.\n\nConcretely, the Generator should produce candidates that span the full Cartesian \"corners\" and mid-points of the (embed_dim, depth) grid, with at least one representative at each embed_dim level and at least two different depth values per level. Lightweight configurations (small embed_dim or shallow depth) are valuable as baselines and are unlikely to be budget-constrained, so include several. Heavier configurations should be attempted where the budget permits, since EHR mortality prediction on MIMIC-IV may reward deeper contextualization of longitudinal features. The goal of this round is diagnostic: identify which dimensions most strongly correlate with AUPRC gain so subsequent iterations can shift toward exploitation.",
+      "results_summary": null
+    }
+  ]
+}
