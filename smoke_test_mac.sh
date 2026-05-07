@@ -3,7 +3,7 @@
 # Full systematic Mac smoke test — covers entire pipeline end-to-end.
 #
 # Pipeline stages:
-#   [Stage 0] run_pipeline.py     (reduced scale: pretrain 3 ep, finetune 3 ep, 5 archs)
+#   [Stage 0] dataset_summary.py + run_pipeline.py  (reduced scale: pretrain 3 ep, finetune 3 ep, 5 archs)
 #   [Stage A] shap_analysis.py    (per-task pooled SHAP + Fig 4 PNGs)
 #   [Stage A] run_meta_regression (Layer 2 architecture_prior.json)
 #   [Stage B] mas_search.py × 4 modes (mas / mas_layer1_only / mas_loto / mas_cold, budget=2 each)
@@ -187,7 +187,17 @@ if [ "$RUN_PIPELINE" = true ]; then
         ok "backed up mlm_model.pt → ${BACKUP_DIR}/"
     fi
 
-    step "run_pipeline.py with smoke-scale params"
+    # Stage 0 has TWO scripts (per plan A1 + A2 design):
+    #   0.0  dataset_summary.py  → <hospital>/dataset_summary.csv  (Layer 1 cosine input)
+    #   0.1  run_pipeline.py     → <hospital>/{metadata.csv, checkpoint_mlm/mlm_model.pt}
+    # If dataset_summary.csv is missing, mas_search silently degrades to cold-start
+    # (Layer 1 returns "No historical data found"), invalidating the smoke check.
+    step "0.0  dataset_summary.py --hospital ${HOSPITAL}  (~1 min CPU)"
+    $PY dataset_summary.py --hospital ${HOSPITAL} \
+        --output_dir "${RESULTS_ROOT}"
+    check_file "${RESULTS_ROOT}/${HOSPITAL}/dataset_summary.csv"
+
+    step "0.1  run_pipeline.py with smoke-scale params"
     echo "  --pretrain_epochs ${SMOKE_PRETRAIN_EPOCHS}    (vs production 50)"
     echo "  --pretrain_patience ${SMOKE_PRETRAIN_PATIENCE}  (vs production 5)"
     echo "  --finetune_epochs ${SMOKE_FINETUNE_EPOCHS}    (vs production 20)"
@@ -207,9 +217,10 @@ if [ "$RUN_PIPELINE" = true ]; then
         --tasks ${SMOKE_TASKS} \
         --num_workers 0
 
-    step "Stage 0 verify outputs"
+    step "0.2  Stage 0 verify outputs"
     check_file "${RESULTS_ROOT}/${HOSPITAL}/metadata.csv"
     check_file "${RESULTS_ROOT}/${HOSPITAL}/checkpoint_mlm/mlm_model.pt"
+    check_file "${RESULTS_ROOT}/${HOSPITAL}/dataset_summary.csv"
 
     # Verify metadata.csv has all 5 tasks + new columns (label_entropy, positive_ratio)
     $PY <<EOF

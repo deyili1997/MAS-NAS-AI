@@ -175,6 +175,14 @@ ok "${SOURCE_HOSPITAL} metadata.csv: ${n_rows} rows × ${n_tasks} tasks"
 if [ "$RUN_PIPELINE" = true ]; then
     section "STAGE 0 — run_pipeline.py for ${TARGET_HOSPITAL} (~85 min)"
 
+    # Stage 0 has TWO scripts (per plan A1 + A2 design):
+    #   0.0  dataset_summary.py  → <hospital>/dataset_summary.csv  (used by Layer 1 cosine)
+    #   0.1  run_pipeline.py     → <hospital>/{metadata.csv, checkpoint_mlm/mlm_model.pt}
+    step "0.0  dataset_summary.py --hospital ${TARGET_HOSPITAL}  (~1 min CPU)"
+    $PY dataset_summary.py --hospital ${TARGET_HOSPITAL} \
+        --output_dir "${RESULTS_ROOT}"
+    check_file "${RESULTS_ROOT}/${TARGET_HOSPITAL}/dataset_summary.csv"
+
     step "0.1  pretrain + finetune ${SMOKE_NUM_ARCHS} archs × ${#SMOKE_TASKS[@]} tasks"
     $PY run_pipeline.py \
         --hospital ${TARGET_HOSPITAL} \

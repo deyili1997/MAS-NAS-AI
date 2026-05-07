@@ -169,21 +169,45 @@ def _compute_target_summary(hospital):
 
 
 def _load_historical_summaries(results_dir):
-    """Load all dataset_summary.csv files from results/*/."""
+    """Load all dataset_summary.csv files from results/*/.
+
+    Each source hospital is expected to have <history_root>/<hospital>/dataset_summary.csv,
+    produced by `python dataset_summary.py --hospital <hospital>` BEFORE running
+    mas_search. If no files are found, mas_search degrades to cold-start
+    (Layer 1 OFF) and emits a loud warning to make this visible.
+    """
     pattern = os.path.join(results_dir, "*", "dataset_summary.csv")
     files = sorted(glob.glob(pattern))
     if not files:
+        print(f"  ⚠ WARNING: No dataset_summary.csv files found at pattern: {pattern}")
+        print(f"    Layer 1 (dataset similarity + top-k arch retrieval) will be OFF.")
+        print(f"    To enable Layer 1, run for each source hospital:")
+        print(f"        python dataset_summary.py --hospital <hospital_name> --output_dir {results_dir}")
         return pd.DataFrame()
-    dfs = [pd.read_csv(f) for f in files]
-    return pd.concat(dfs, ignore_index=True)
+    return pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
 
 
 def _find_most_similar_hospital(target_summary, historical_df):
-    """Find the most similar hospital by cosine similarity on summary features."""
+    """Find the most similar hospital by cosine similarity on summary features.
+
+    For cross-hospital design, the target hospital itself is excluded from the
+    candidate pool (line below). If the pool is empty after exclusion (i.e.,
+    the target is the only hospital with a dataset_summary.csv), we fall back
+    to using ALL candidates — which means self-matching with similarity=1.0.
+    This is the **self-prior** mode (intended for Phase 1 single-hospital test
+    runs), and emits a loud warning so it can't happen unintentionally in
+    cross-hospital production.
+    """
     target_hospital = target_summary["hospital"]
 
     candidates = historical_df[historical_df["hospital"] != target_hospital].copy()
     if candidates.empty:
+        print(f"  ⚠ WARNING: No candidate source hospitals found after excluding target "
+              f"'{target_hospital}'. Falling back to SELF-PRIOR mode (target uses its "
+              f"own metadata as Layer 1 source). This is correct ONLY for "
+              f"single-hospital test runs (e.g., Phase 1 MIMIC-IV self-prior). "
+              f"For cross-hospital production (Phase 2), ensure at least one OTHER "
+              f"hospital has results/<source>/dataset_summary.csv generated.")
         candidates = historical_df.copy()
 
     target_vec = np.array([[target_summary.get(c, 0) for c in SUMMARY_FEATURE_COLS]])
@@ -391,7 +415,12 @@ def gather_historical_context(hospital, task, max_params, history_root, top_k,
     historical_df = _load_historical_summaries(history_root)
 
     if historical_df.empty:
-        print("  No historical data found — starting cold (no prior experiments)")
+        # _load_historical_summaries already printed the dataset_summary.csv miss warning.
+        # This branch fires only when there are zero source hospitals → effectively cold.
+        print(f"  ⚠ Layer 1 OFF — proceeding with EMPTY top_k_archs and EMPTY meta_regression_prior.")
+        print(f"    Agent prompts will not see Layer 1 examples or Layer 2 architecture_prior.")
+        print(f"    Behavior is equivalent to mas_cold even though --no_history was not passed.")
+        print(f"    To make this explicit in output paths/method_name, pass --no_history.")
         return {
             "target_summary": target_summary,
             "similar_hospital": None,
