@@ -126,9 +126,13 @@ assert torch.cuda.is_available(), 'CUDA not available! Smoke needs GPU.'
 "
 
 step "Source data — MIMIC-III (target) + MIMIC-IV (source)"
+# utils.paths.get_processed_root() routes data to /blue on HPC (it detects HPC
+# by /blue/mei.liu/lideyi/MAS-NAS existing). The relative path "data_process/..."
+# would resolve via cwd /home/lideyi/MAS-NAS, missing the actual data location.
 for HOSP in "${TARGET_HOSPITAL}" "${SOURCE_HOSPITAL}"; do
+    DATA_ROOT=$($PY -c "from utils.paths import get_processed_root; print(get_processed_root('${HOSP}'))")
     for f in mimic.pkl mimic_pretrain.pkl mimic_downstream.pkl mimic_nextdiag_6m.pkl mimic_nextdiag_12m.pkl; do
-        check_file "data_process/${HOSP}/${HOSP}-processed/${f}"
+        check_file "${DATA_ROOT}/${f}"
     done
 done
 
@@ -210,8 +214,11 @@ ok "Stage 0 complete"
 section "STAGE A — Layer 2 prior generation from ${SOURCE_HOSPITAL} (~2 min)"
 
 step "A.1  shap_analysis.py --hospitals ${SOURCE_HOSPITAL}"
+# IMPORTANT: pass --output_dir explicitly — default is "./results/shap_analysis"
+# which on HPC resolves to /home (cwd is /home/lideyi/MAS-NAS), bypassing /blue.
 $PY shap_analysis.py --hospitals ${SOURCE_HOSPITAL} \
     --results_dir "${RESULTS_ROOT}" \
+    --output_dir "${RESULTS_ROOT}/shap_analysis" \
     --interaction_main embed_dim depth num_heads mlp_ratio
 
 for task in "${SMOKE_TASKS[@]}"; do
