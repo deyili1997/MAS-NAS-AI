@@ -11,8 +11,32 @@ data_process/*/*-raw/*
 data_process/*/*-processed/*
 !data_process/*/*-processed/.gitkeep
 
-# Results: track all CSVs / JSONs / PNGs / agent_io_logs (small, useful for
-# analysis), but ignore model checkpoints (.pt files in checkpoint_mlm/) since
-# they're large + regenerable by re-pretraining.
-results/*/checkpoint_mlm/*
-!results/*/checkpoint_mlm/.gitkeep
+# Results: do NOT track any per-run artifacts.
+# Reason: on HPC the smoke writes to /blue (per RESULTS_ROOT in sbatch); on Mac
+# the smoke writes to local /Users/.../results. Tracking either copy causes pull
+# conflicts whenever HPC and Mac diverge, and accumulates dead artifacts in repo
+# (300+ files, 14M+ over time). Final paper figures go in analyze/ (separate dir).
+# Keep .gitkeep files so the empty directory structure is reproducible.
+results/**
+!results/.gitkeep
+!results/**/.gitkeep
+
+# Slurm logs — never track (job-specific, regenerable)
+slurm_logs/**
+!slurm_logs/.gitkeep
+slurm-*.out
+slurm-*.err
+
+# Analyze: track plot scripts (.py) but NOT generated outputs.
+# Same rationale as results/**: Mac dev and HPC production both write here,
+# causing pull conflicts and pollution. Final paper figures live on /blue
+# (per ANALYZE_DIR in sbatch) or local /Users/.../analyze on Mac.
+analyze/*.csv
+analyze/*.png
+analyze/*.json
+!analyze/.gitkeep
+
+# Mac-only smoke scripts (hardcoded /Users/.../MAS-NAS path). HPC uses
+# smoke_test_hipergator_xhospital.sbatch instead — no point shipping these.
+smoke_test_mac.sh
+smoke_test_mac_xhospital.sh
