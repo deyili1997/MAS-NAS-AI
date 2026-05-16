@@ -1,14 +1,18 @@
 #!/bin/bash
-#SBATCH --job-name=mas_nas_xhospital_smoke
+#SBATCH --job-name=xh-smoke
 #SBATCH --account=mei.liu
 #SBATCH --qos=mei.liu
-#SBATCH --partition=gpu
-#SBATCH --gres=gpu:a100:1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=64G
+#SBATCH --mail-type=END,FAIL
+#SBATCH --mail-user=lideyi@ufl.edu
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem-per-cpu=16gb
+#SBATCH --partition=hpg-turin
+#SBATCH --gpus=1
 #SBATCH --time=12:00:00
-#SBATCH --output=slurm-%j-xhospital-smoke.out
-#SBATCH --error=slurm-%j-xhospital-smoke.err
+#SBATCH --output=/home/lideyi/MAS-NAS/slurm_logs/%x_%j.out
+#SBATCH --error=/home/lideyi/MAS-NAS/slurm_logs/%x_%j.err
 
 # ============================================================================
 # Cross-Hospital Near-Production Smoke (HiPerGator, single self-contained sbatch)
@@ -38,6 +42,9 @@
 
 set -e
 
+# Ensure slurm_logs/ exists for --output/--error paths
+mkdir -p /home/lideyi/MAS-NAS/slurm_logs
+
 echo "=========================================="
 echo "Job ID:        $SLURM_JOB_ID"
 echo "Job name:      $SLURM_JOB_NAME"
@@ -47,7 +54,6 @@ echo "Working dir:   $(pwd)"
 echo "=========================================="
 
 # Activate conda env
-module purge
 module load conda
 conda activate Autoformer
 
