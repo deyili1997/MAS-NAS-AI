@@ -39,7 +39,7 @@ CKPT=/blue/mei.liu/lideyi/MAS-NAS/results/${HOSPITAL}/checkpoint_mlm/mlm_model.p
 # Per-seed results dir keeps each seed's CSVs isolated; aggregate_results.py
 # globs across results/seed_*/<hospital>/search/<baseline>/<task>/.
 RESULTS_DIR=/blue/mei.liu/lideyi/MAS-NAS/results/seed_${SEED}
-HISTORY_ROOT=results    # hospital-level INPUT root (metadata.csv, shap_analysis/, checkpoint_mlm/) — shared across seeds
+HISTORY_ROOT=/blue/mei.liu/lideyi/MAS-NAS/results    # hospital-level INPUT root (metadata.csv, shap_analysis/, checkpoint_mlm/) — shared across seeds
 
 COMMON_ARGS=(
     --hospital $HOSPITAL
