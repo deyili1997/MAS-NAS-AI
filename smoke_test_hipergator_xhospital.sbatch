@@ -120,10 +120,10 @@ $PY --version
 
 step "Critical deps"
 $PY -c "
-import sys
+import sys, importlib.util
 need = ['xgboost', 'shap', 'matplotlib', 'statsmodels', 'pandas', 'numpy', 'sklearn',
         'torch', 'anthropic', 'dotenv', 'scipy']
-missing = [p for p in need if __import__('importlib').util.find_spec(p) is None]
+missing = [p for p in need if importlib.util.find_spec(p) is None]
 if missing:
     print(f'  MISSING: {missing}'); sys.exit(1)
 print(f'  ✓ all {len(need)} deps present')
