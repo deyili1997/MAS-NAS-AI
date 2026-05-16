@@ -10,7 +10,7 @@
 #SBATCH --mem-per-cpu=16gb
 #SBATCH --partition=hpg-turin
 #SBATCH --gpus=1
-#SBATCH --time=12:00:00
+#SBATCH --time=24:00:00
 #SBATCH --output=/blue/mei.liu/lideyi/MAS-NAS/slurm_logs/%x_%j.out
 #SBATCH --error=/blue/mei.liu/lideyi/MAS-NAS/slurm_logs/%x_%j.err
 
@@ -33,7 +33,7 @@
 #   [Stage E] aggregate + plot all figures + tables
 #
 # Estimated wall-time on A100 (single GPU): ~8-10 hours
-# Wall request: 12:00:00 (safe margin)
+# Wall request: 24:00:00 (double the estimate; plenty of margin for retries)
 #
 # Submit:    sbatch smoke_test_hipergator_xhospital.sbatch
 # Monitor:   squeue -u $USER  +  tail -f slurm-<jobid>-xhospital-smoke.out
@@ -80,6 +80,13 @@ SMOKE_FINETUNE_PATIENCE=2
 SMOKE_NUM_ARCHS=10
 SMOKE_BUDGET=10
 SMOKE_REGRESSION_K=3
+
+# Cheap model for LLM calls (mas_search agents + LLM-based baselines).
+# Haiku is ~3.7x cheaper than Sonnet ($0.80/$4 vs $3/$15 per M tokens) → at
+# SMOKE_BUDGET=10 this brings total LLM cost from ~$10-15 to ~$3-5. Smoke
+# only needs code-path validation, not best-in-class agent reasoning;
+# production paper runs should switch back to sonnet/opus by overriding here.
+LLM_MODEL="claude-haiku-4-5"
 
 # Paths — ALL outputs go to /blue (lab shared, large quota); /home is small.
 # Only source code stays in PROJECT_ROOT (cd'd into so relative imports work).
@@ -252,13 +259,14 @@ for mode_spec in "${MODES[@]}"; do
     flag="${mode_spec#*:}"
     for task in "${SMOKE_TASKS[@]}"; do
         counter=$((counter + 1))
-        step "B.${counter}/${total_runs}  mas_search ${mode} on ${task}"
+        step "B.${counter}/${total_runs}  mas_search ${mode} on ${task} (model=${LLM_MODEL})"
         $PY mas_search.py \
             --hospital ${TARGET_HOSPITAL} --task ${task} --max_params 2000000 \
             --budget ${SMOKE_BUDGET} --seed ${SMOKE_SEED} --num_workers ${NUM_WORKERS} \
             --finetune_epochs ${SMOKE_FINETUNE_EPOCHS} \
             --finetune_patience ${SMOKE_FINETUNE_PATIENCE} \
             --top_k_epochs 2 \
+            --model ${LLM_MODEL} \
             ${flag} \
             --results_dir "${SEED_OUTPUT}" \
             --history_root "${RESULTS_ROOT}"
@@ -290,7 +298,13 @@ for i in 0 1 2 3 4; do
     bname=${BASELINE_NAMES[$i]}
     for task in "${SMOKE_TASKS[@]}"; do
         counter=$((counter + 1))
-        step "C.${counter}/${total_runs}  baseline${i} (${bname}) on ${task}"
+        # baseline0 (Random) + baseline1 (EA) don't call LLM; baseline 2/3/4 do.
+        # Pass --model uniformly — baseline0/1 ignore it harmlessly.
+        MODEL_ARG=""
+        if [ "$i" -ge 2 ]; then
+            MODEL_ARG="--model ${LLM_MODEL}"
+        fi
+        step "C.${counter}/${total_runs}  baseline${i} (${bname}) on ${task} ${MODEL_ARG}"
         $PY baselines/baseline${i}.py \
             --hospital ${TARGET_HOSPITAL} --task ${task} --max_params 2000000 \
             --budget ${SMOKE_BUDGET} --seed ${SMOKE_SEED} --num_workers ${NUM_WORKERS} \
@@ -298,6 +312,7 @@ for i in 0 1 2 3 4; do
             --finetune_epochs ${SMOKE_FINETUNE_EPOCHS} \
             --finetune_patience ${SMOKE_FINETUNE_PATIENCE} \
             --top_k_epochs 2 \
+            ${MODEL_ARG} \
             --results_dir "${SEED_OUTPUT}"
 
         DIR="${SEED_OUTPUT}/${TARGET_HOSPITAL}/search/baseline${i}/${task}"
@@ -378,6 +393,7 @@ section "HPC XHOSPITAL SMOKE PASSED ✓"
 echo ""
 echo "Target = ${TARGET_HOSPITAL}, Source = ${SOURCE_HOSPITAL}, Seed = ${SMOKE_SEED}"
 echo "Scale  = budget ${SMOKE_BUDGET}, pretrain ${SMOKE_PRETRAIN_EPOCHS} ep, finetune ${SMOKE_FINETUNE_EPOCHS} ep, num_archs ${SMOKE_NUM_ARCHS}"
+echo "LLM    = ${LLM_MODEL}"
 echo ""
 echo "─── Stage A artifacts ───"
 [ -d "${RESULTS_ROOT}/shap_analysis" ] && \
