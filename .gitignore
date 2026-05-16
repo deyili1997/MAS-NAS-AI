@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .DS_Store
+.ipynb_checkpoints/
 
 # Data files: ignore raw/processed contents (huge + PHI), keep folder
 # structure via .gitkeep so the layout is reproducible.
