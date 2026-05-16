@@ -11,8 +11,8 @@
 #SBATCH --partition=hpg-turin
 #SBATCH --gpus=1
 #SBATCH --time=12:00:00
-#SBATCH --output=/home/lideyi/MAS-NAS/slurm_logs/%x_%j.out
-#SBATCH --error=/home/lideyi/MAS-NAS/slurm_logs/%x_%j.err
+#SBATCH --output=/blue/mei.liu/lideyi/MAS-NAS/slurm_logs/%x_%j.out
+#SBATCH --error=/blue/mei.liu/lideyi/MAS-NAS/slurm_logs/%x_%j.err
 
 # ============================================================================
 # Cross-Hospital Near-Production Smoke (HiPerGator, single self-contained sbatch)
@@ -42,8 +42,8 @@
 
 set -e
 
-# Ensure slurm_logs/ exists for --output/--error paths
-mkdir -p /home/lideyi/MAS-NAS/slurm_logs
+# Ensure slurm_logs/ exists on /blue (--output/--error paths use this)
+mkdir -p /blue/mei.liu/lideyi/MAS-NAS/slurm_logs
 
 echo "=========================================="
 echo "Job ID:        $SLURM_JOB_ID"
@@ -81,10 +81,12 @@ SMOKE_NUM_ARCHS=10
 SMOKE_BUDGET=10
 SMOKE_REGRESSION_K=3
 
-# Paths — outputs go to /blue (lab shared, large quota)
+# Paths — ALL outputs go to /blue (lab shared, large quota); /home is small.
+# Only source code stays in PROJECT_ROOT (cd'd into so relative imports work).
 RESULTS_ROOT="/blue/mei.liu/lideyi/MAS-NAS/results"
 SEED_OUTPUT="${RESULTS_ROOT}/seed_${SMOKE_SEED}"
-ANALYZE_DIR="${PROJECT_ROOT}/analyze"
+ANALYZE_DIR="/blue/mei.liu/lideyi/MAS-NAS/analyze"
+mkdir -p "${ANALYZE_DIR}"
 
 NUM_WORKERS=4
 
