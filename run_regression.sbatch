@@ -38,7 +38,7 @@ cd /home/lideyi/MAS-NAS
 python run_regression.py \
     --hospital $HOSPITAL \
     --task $TASK \
-    --k 100 \
+    --k 150 \
     --seed 123 \
     --batch_size 128 \
     --pretrain_epochs 100 \
