@@ -7,7 +7,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=16gb
-#SBATCH --time=48:00:00
+#SBATCH --time=96:00:00
 #SBATCH --output=/blue/mei.liu/lideyi/MAS-NAS/slurm_logs/%x_%j.out
 #SBATCH --error=/blue/mei.liu/lideyi/MAS-NAS/slurm_logs/%x_%j.err
 #SBATCH --mail-type=END,FAIL
@@ -41,7 +41,7 @@ python run_regression.py \
     --task $TASK \
     --k 100 \
     --seed 123 \
-    --batch_size 64 \
+    --batch_size 128 \
     --pretrain_epochs 100 \
     --pretrain_patience 5 \
     --finetune_epochs 30 \
@@ -59,7 +59,7 @@ python run_regression.py \
     --drop_path_rate 0.1 \
     --flops_seq_len 512 \
     --results_dir /blue/mei.liu/lideyi/MAS-NAS/results \
-    --num_workers 0 \
+    --num_workers 4 \
     --cudnn_benchmark
 
 date
