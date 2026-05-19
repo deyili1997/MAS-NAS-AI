@@ -40,7 +40,7 @@ python run_regression.py \
     --task $TASK \
     --k 150 \
     --seed 123 \
-    --batch_size 128 \
+    --batch_size 64 \
     --pretrain_epochs 100 \
     --pretrain_patience 5 \
     --finetune_epochs 30 \

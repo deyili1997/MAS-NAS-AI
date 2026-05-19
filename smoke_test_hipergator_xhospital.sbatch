@@ -80,7 +80,7 @@ SMOKE_FINETUNE_PATIENCE=2
 SMOKE_NUM_ARCHS=10
 SMOKE_BUDGET=10
 SMOKE_REGRESSION_K=3
-SMOKE_BATCH_SIZE=128         # match production sbatch (run_baseline/run_pipeline)
+SMOKE_BATCH_SIZE=64          # OneFL+ sites have longer seq (max_adm up to 8), bs=128 OOMs L4
 
 # Cheap model for LLM calls (mas_search agents + LLM-based baselines).
 # Haiku is ~3.7x cheaper than Sonnet ($0.80/$4 vs $3/$15 per M tokens) → at
