@@ -2,7 +2,7 @@
 #SBATCH --job-name=reg
 #SBATCH --partition=hpg-turin
 #SBATCH --exclude=c1105a-s[5,10,12]
-#SBATCH --gpus=1
+#SBATCH --gres=gpu:a100:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
