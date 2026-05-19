@@ -34,7 +34,7 @@ python run_pipeline.py \
     --hospital $HOSPITAL \
     --tasks death stay readmission next_diag_6m_pheno next_diag_12m_pheno \
     --seed 123 \
-    --batch_size 64 \
+    --batch_size 128 \
     --pretrain_epochs 100 \
     --pretrain_patience 5 \
     --finetune_epochs 30 \

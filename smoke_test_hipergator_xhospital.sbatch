@@ -80,6 +80,7 @@ SMOKE_FINETUNE_PATIENCE=2
 SMOKE_NUM_ARCHS=10
 SMOKE_BUDGET=10
 SMOKE_REGRESSION_K=3
+SMOKE_BATCH_SIZE=128         # match production sbatch (run_baseline/run_pipeline)
 
 # Cheap model for LLM calls (mas_search agents + LLM-based baselines).
 # Haiku is ~3.7x cheaper than Sonnet ($0.80/$4 vs $3/$15 per M tokens) → at
@@ -181,6 +182,7 @@ if [ "$NEED_SOURCE_PIPELINE" = true ]; then
         --pretrain_patience ${SMOKE_PRETRAIN_PATIENCE} \
         --finetune_epochs ${SMOKE_FINETUNE_EPOCHS} \
         --finetune_patience ${SMOKE_FINETUNE_PATIENCE} \
+        --batch_size ${SMOKE_BATCH_SIZE} \
         --num_workers ${NUM_WORKERS} \
         --output_dir "${RESULTS_ROOT}"
     check_file "${RESULTS_ROOT}/${SOURCE_HOSPITAL}/metadata.csv"
@@ -201,6 +203,7 @@ $PY run_pipeline.py \
     --pretrain_patience ${SMOKE_PRETRAIN_PATIENCE} \
     --finetune_epochs ${SMOKE_FINETUNE_EPOCHS} \
     --finetune_patience ${SMOKE_FINETUNE_PATIENCE} \
+    --batch_size ${SMOKE_BATCH_SIZE} \
     --num_workers ${NUM_WORKERS} \
     --output_dir "${RESULTS_ROOT}"
 
@@ -263,6 +266,7 @@ for mode_spec in "${MODES[@]}"; do
         $PY mas_search.py \
             --hospital ${TARGET_HOSPITAL} --task ${task} --max_params 2000000 \
             --budget ${SMOKE_BUDGET} --seed ${SMOKE_SEED} --num_workers ${NUM_WORKERS} \
+            --batch_size ${SMOKE_BATCH_SIZE} \
             --finetune_epochs ${SMOKE_FINETUNE_EPOCHS} \
             --finetune_patience ${SMOKE_FINETUNE_PATIENCE} \
             --top_k_epochs 2 \
@@ -309,6 +313,7 @@ for i in 0 1 2 3 4; do
             --hospital ${TARGET_HOSPITAL} --task ${task} --max_params 2000000 \
             --budget ${SMOKE_BUDGET} --seed ${SMOKE_SEED} --num_workers ${NUM_WORKERS} \
             --ckpt_path "${CKPT_PATH}" \
+            --batch_size ${SMOKE_BATCH_SIZE} \
             --finetune_epochs ${SMOKE_FINETUNE_EPOCHS} \
             --finetune_patience ${SMOKE_FINETUNE_PATIENCE} \
             --top_k_epochs 2 \
@@ -337,6 +342,7 @@ for task in "${SMOKE_TASKS[@]}"; do
         --finetune_epochs ${SMOKE_FINETUNE_EPOCHS} \
         --finetune_patience ${SMOKE_FINETUNE_PATIENCE} \
         --top_k_epochs 2 \
+        --batch_size ${SMOKE_BATCH_SIZE} \
         --seed ${SMOKE_SEED} --num_workers ${NUM_WORKERS} \
         --results_dir "${RESULTS_ROOT}"
 

@@ -58,7 +58,7 @@ COMMON_ARGS=(
     --finetune_epochs 30
     --finetune_patience 5
     --top_k_epochs 3
-    --batch_size 64
+    --batch_size 128
     --lr 2e-4
     --weight_decay 1e-2
     --max_grad_norm 1.0
