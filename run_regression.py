@@ -559,6 +559,9 @@ def main():
             "autoformer_auprc": avg_val["auprc"],
         })
 
+        # Incremental save — flush every arch so wall-timeout doesn't lose ALL data
+        pd.DataFrame(autoformer_rows).to_csv(out_dir / "autoformer_results.csv", index=False)
+
     del supernet_ckpt
     empty_cache()
 
@@ -603,6 +606,10 @@ def main():
             "traditional_auroc": avg_val["auroc"],
             "traditional_auprc": avg_val["auprc"],
         })
+
+        # Incremental save — critical because trad pretrain is the long phase
+        # (~40 min/arch). Wall-timeout without this loses ALL trad data.
+        pd.DataFrame(traditional_rows).to_csv(out_dir / "traditional_results.csv", index=False)
 
         # Free per-arch pretrain ckpt (delete, per user decision)
         del trad_ckpt
