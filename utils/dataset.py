@@ -7,6 +7,55 @@ from pandas.arrays import ArrowStringArray
 
 from utils.task_registry import task_info
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Hardcoded per-patient maximum sequence length.
+#
+# Derived offline via `analyze/seq_length_stats.py` on 8 OneFL+ pretrain pkls
+# (after OneFL+ owner's patient-level LOINC dedup, 2026-05-20) + MIMIC-III/IV.
+# At 256, 99.01% of POOLED patients are un-truncated; worst-site coverage is
+# source_10 at 95.46%. The remaining outlier patients get their OLDEST
+# admission tokens dropped (keep [CLS] + last MAX_SEQ_LEN-1 tokens), preserving
+# the most recent / most clinically predictive encounters.
+#
+# Per-site coverage at MAX_SEQ_LEN = 256:
+#   MIMIC-IV     100.00%   (max seq 198)        ← truncation never fires for MIMIC
+#   MIMIC-III    100.00%   (max seq 260)        ← only 1 patient cut by ~4 tokens
+#   source_15    100.00%   (max seq 251)
+#   source_3     100.00%   (max seq 220)
+#   source_11     99.99%   (max seq 537)
+#   source_4      99.82%   (max seq 393)
+#   source_1      99.50%   (max seq 608)
+#   source_16     97.58%   (max seq 513)
+#   source_14     97.40%   (max seq 682)
+#   source_10     95.46%   (max seq 665)
+#
+# If runtime OOM still happens at this value (it shouldn't at bs=128 on L4):
+# halve MAX_SEQ_LEN to 128 (still covers ~75% pooled) OR drop batch_size.
+MAX_SEQ_LEN = 256
+
+
+def _truncate_oldest(input_ids, token_types, adm_index, mlm_labels=None):
+    """Truncate to MAX_SEQ_LEN: keep [CLS] + last (MAX_SEQ_LEN - 1) tokens.
+
+    Drops OLDEST admission tokens (= front of list, since admissions iterate
+    chronologically oldest→newest in `__getitem__`). [CLS] at index 0 is
+    always preserved. No-op if len(input_ids) <= MAX_SEQ_LEN.
+
+    Returns the (possibly shortened) lists in the same order they were passed.
+    `mlm_labels` is optional (only used in PreTrainEHRDataset).
+    """
+    if len(input_ids) <= MAX_SEQ_LEN:
+        return input_ids, token_types, adm_index, mlm_labels
+    keep_n = MAX_SEQ_LEN - 1
+    input_ids   = [input_ids[0]]   + input_ids[-keep_n:]
+    token_types = [token_types[0]] + token_types[-keep_n:]
+    adm_index   = [adm_index[0]]   + adm_index[-keep_n:]
+    if mlm_labels is not None:
+        mlm_labels = [mlm_labels[0]] + mlm_labels[-keep_n:]
+    return input_ids, token_types, adm_index, mlm_labels
+
+
 class PreTrainEHRDataset(Dataset):
     def __init__(self, ehr_pretrain_data, tokenizer, token_type, mask_rate, max_adm_num, skip_transform=False):
         self.tokenizer = tokenizer
@@ -99,6 +148,10 @@ class PreTrainEHRDataset(Dataset):
                     token_types.append(type_id)
                     adm_index.append(adm_i)
                     mlm_labels.append(-100)
+
+        # Truncate BEFORE MLM masking so masked positions are within retained tokens
+        input_ids, token_types, adm_index, mlm_labels = _truncate_oldest(
+            input_ids, token_types, adm_index, mlm_labels)
 
         candidate_positions = list(range(1, len(input_ids)))
         if candidate_positions:
@@ -200,6 +253,10 @@ class FineTuneEHRDataset(PreTrainEHRDataset):
                     input_ids.append(code_id)
                     token_types.append(type_id)
                     adm_index.append(adm_i)
+
+        # Truncate to MAX_SEQ_LEN (same as PreTrainEHRDataset; no mlm_labels here)
+        input_ids, token_types, adm_index, _ = _truncate_oldest(
+            input_ids, token_types, adm_index, mlm_labels=None)
 
         # build labels based on the task
         if self.task == "death":
