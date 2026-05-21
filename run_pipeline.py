@@ -637,6 +637,16 @@ def finetune_and_evaluate(args, tokenizer, ckpt_path, device):
 
             all_results.append(row)
 
+            # Incremental save — flush metadata.csv after each (task, arch) so
+            # wall-timeout (long runs on big OneFL+ sites) doesn't lose all data.
+            try:
+                from pathlib import Path
+                _out_dir = Path(args.output_dir) / args.hospital
+                _out_dir.mkdir(parents=True, exist_ok=True)
+                pd.DataFrame(all_results).to_csv(_out_dir / "metadata.csv", index=False)
+            except Exception as _e:
+                print(f"    [warn] incremental metadata save failed: {_e}")
+
     return all_results
 
 
