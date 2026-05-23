@@ -22,7 +22,8 @@ Paper claims (each isolated by one delta in the companion table):
     delta_cold_vs_baseline       multi-agent reasoning beats LLM baselines even with no prior
 
 Usage:
-    python analyze/plot_loto_ablation.py --hospital MIMIC-IV
+    python analyze/plot_loto_ablation.py --hospitals MIMIC-IV
+    python analyze/plot_loto_ablation.py --hospitals MIMIC-III MIMIC-IV
 """
 from __future__ import annotations
 
@@ -231,8 +232,9 @@ def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--results_root", type=str, default="./results",
                    help="Root containing seed_<N>/ subdirectories.")
-    p.add_argument("--hospital", type=str, required=True,
-                   help="Hospital name (e.g. MIMIC-IV).")
+    p.add_argument("--hospitals", type=str, nargs="+", required=True,
+                   help="One or more hospital names (e.g. MIMIC-III MIMIC-IV). "
+                        "Each hospital produces its own PNG with _<hospital> suffix.")
     p.add_argument("--out_dir", type=str, default="./analyze",
                    help="Output directory for the figure.")
     args = p.parse_args()
@@ -241,34 +243,41 @@ def main():
     out_dir = Path(args.out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[Fig 5] hospital={args.hospital}")
-    print(f"[Fig 5] reading from {results_root}/seed_*/{args.hospital}/search/...")
-    all_scores = load_best_scores(results_root, args.hospital)
-    print(f"[Fig 5] loaded {len(all_scores)} (method, task) groups")
+    print(f"[Fig 5] hospitals={args.hospitals}")
+    print(f"[Fig 5] out_dir={out_dir}\n")
 
-    if not all_scores:
-        print("⚠ No best.csv records found. Submit mas + mas_layer1_only + mas_loto + mas_cold + baseline3/4 jobs first.")
-        return
+    # Per-hospital ablation figure. 4 MAS conditions + best baseline shown
+    # per task; figure5_loto_robustness_<hospital>.png so cross-hospital runs
+    # don't overwrite.
+    for hospital in args.hospitals:
+        print(f"=== Hospital: {hospital}")
+        print(f"  reading from {results_root}/seed_*/{hospital}/search/...")
+        all_scores = load_best_scores(results_root, hospital)
+        print(f"  loaded {len(all_scores)} (method, task) groups")
 
-    # 5 bars per panel (4 MAS conditions + 1 baseline) needs slightly more width
-    fig, axes = plt.subplots(1, len(TASKS), figsize=(4.5 * len(TASKS), 4.5), sharey=False)
-    if len(TASKS) == 1:
-        axes = [axes]
+        if not all_scores:
+            print(f"  ⚠ No best.csv for {hospital}. "
+                  f"Submit mas + mas_layer1_only + mas_loto + mas_cold + baseline3/4 jobs first.\n")
+            continue
 
-    for ax, task in zip(axes, TASKS):
-        plot_panel(ax, all_scores, task)
+        fig, axes = plt.subplots(1, len(TASKS), figsize=(4.5 * len(TASKS), 4.5), sharey=False)
+        if len(TASKS) == 1:
+            axes = [axes]
 
-    fig.suptitle(
-        f"Layer Ablation — {args.hospital}\n"
-        f"(L1-only isolates Layer 2's contribution; LOTO tests Layer 1 fallback; cold removes both priors)",
-        fontsize=12, y=1.04,
-    )
-    plt.tight_layout()
+        for ax, task in zip(axes, TASKS):
+            plot_panel(ax, all_scores, task)
 
-    out_path = out_dir / "figure5_loto_robustness.png"
-    plt.savefig(out_path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"\n✓ Saved {out_path}")
+        fig.suptitle(
+            f"Layer Ablation — {hospital}\n"
+            f"(L1-only isolates Layer 2's contribution; LOTO tests Layer 1 fallback; cold removes both priors)",
+            fontsize=12, y=1.04,
+        )
+        plt.tight_layout()
+
+        out_path = out_dir / f"figure5_loto_robustness_{hospital}.png"
+        plt.savefig(out_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  ✓ Saved {out_path}\n")
 
 
 if __name__ == "__main__":

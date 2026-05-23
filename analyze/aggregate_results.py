@@ -6,26 +6,30 @@ Reads from `results/seed_<N>/<hospital>/search/<method>/<task>/`:
   - `<method>_search.csv`   — all evaluated architectures (with iteration col)
   - `search_meta.json`      — wall-clock, LLM calls, budget, seed, ...
 
-Produces 7 CSVs under `analyze/`:
-  - main_table.csv             Table 1 (paper main): best AUPRC per method × task,
-                               mean ± std over seeds (all methods @ same budget)
-  - efficiency_table.csv       Table 2 (paper main): MAS-NAS @ evals=30 vs baselines
-                               @ evals=100 — "70% less compute, still wins". Extracted
-                               from same search.csv (one run gives both tables).
-  - loto_ablation_table.csv    Fig 5 companion: per-task comparison of
-                               {MAS-exact, MAS-LOTO, MAS-cold, best-LLM-baseline}
-                               with delta columns. Validates Plan A robustness.
-  - supp_table.csv             Supplementary: all 4 metrics
-  - arch_table.csv             Selected architectures' params/FLOPs (verifies
-                               --max_params constraint met across all methods)
-  - cost_table.csv             Wall-clock + LLM call counts (compute-fairness audit)
-  - significance.csv           Paired Wilcoxon: MAS-NAS vs each baseline, with
-                               Holm-Bonferroni correction across 5 baselines
+Produces 7 CSVs PER HOSPITAL under `analyze/` (suffixed `_<hospital>`):
+  - main_table_<H>.csv             Table 1 (paper main): best AUPRC per method × task,
+                                   mean ± std over seeds (all methods @ same budget)
+  - efficiency_table_<H>.csv       Table 2 (paper main): MAS-NAS @ evals=30 vs baselines
+                                   @ evals=100 — "70% less compute, still wins". Extracted
+                                   from same search.csv (one run gives both tables).
+  - loto_ablation_table_<H>.csv    Fig 5 companion: per-task comparison of
+                                   {MAS-exact, MAS-Layer1-only, MAS-LOTO, MAS-cold, best-LLM-baseline}
+                                   with delta columns. Validates Plan A robustness.
+  - supp_table_<H>.csv             Supplementary: all 4 metrics
+  - arch_table_<H>.csv             Selected architectures' params/FLOPs (verifies
+                                   --max_params constraint met across all methods)
+  - cost_table_<H>.csv             Wall-clock + LLM call counts (compute-fairness audit)
+  - significance_<H>.csv           Paired Wilcoxon: MAS-NAS vs each baseline, with
+                                   Holm-Bonferroni correction across 5 baselines
 
-Usage:
-    python analyze/aggregate_results.py --hospital MIMIC-IV
-    python analyze/aggregate_results.py --hospital MIMIC-IV --results_root /blue/.../results
-    python analyze/aggregate_results.py --hospital MIMIC-IV --mas_budget 30 --baseline_budget 100
+Multi-hospital usage (Phase 2 production — MIMIC-III + MIMIC-IV cross-hospital NAS):
+    python analyze/aggregate_results.py --hospitals MIMIC-III MIMIC-IV
+    python analyze/aggregate_results.py --hospitals MIMIC-III MIMIC-IV \\
+        --results_root /blue/mei.liu/lideyi/MAS-NAS/results
+
+Single-hospital usage (Phase 1 test / sanity check):
+    python analyze/aggregate_results.py --hospitals MIMIC-IV
+    python analyze/aggregate_results.py --hospitals MIMIC-IV --mas_budget 30 --baseline_budget 100
 """
 from __future__ import annotations
 
@@ -591,8 +595,10 @@ def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--results_root", type=str, default="./results",
                    help="Root containing seed_<N>/ subdirectories (or single seed root).")
-    p.add_argument("--hospital", type=str, required=True,
-                   help="Hospital name, e.g. MIMIC-IV.")
+    p.add_argument("--hospitals", type=str, nargs="+", required=True,
+                   help="One or more hospital names, e.g. MIMIC-III MIMIC-IV. "
+                        "Each hospital is aggregated independently and produces "
+                        "its own set of 7 output CSVs with _<hospital> suffix.")
     p.add_argument("--out_dir", type=str, default="./analyze",
                    help="Where to write 6 output CSVs.")
     p.add_argument("--mas_budget", type=int, default=30,
@@ -606,73 +612,96 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"[Aggregate] results_root={results_root}")
-    print(f"[Aggregate] hospital={args.hospital}")
+    print(f"[Aggregate] hospitals={args.hospitals}  ({len(args.hospitals)} site(s))")
     print(f"[Aggregate] out_dir={out_dir}\n")
 
-    records = collect_results(results_root, args.hospital)
-    print(f"Found {len(records)} (method, task, seed) records.")
-    if not records:
-        print("⚠ No records. Check --results_root + glob layout (results/seed_*/hospital/search/method/task/).")
-        return
+    # Per-hospital aggregation. Each hospital is independent: same 7 build_*
+    # functions, but output paths get a _<hospital> suffix so multi-site runs
+    # don't overwrite each other. records dict (keyed by (method, task, seed))
+    # is rebuilt per hospital from its own search/ subtree.
+    summary_rows = []     # cross-hospital summary at the end
+    for hospital in args.hospitals:
+        print("=" * 70)
+        print(f"=== Hospital: {hospital}")
+        print("=" * 70)
 
-    print("\n[1/6] Main table — AUPRC mean ± std")
-    df_main = build_main_table(records, out_dir / "main_table.csv")
-    print(df_main.to_string(index=False))
+        records = collect_results(results_root, hospital)
+        print(f"Found {len(records)} (method, task, seed) records for {hospital}.")
+        if not records:
+            print(f"  ⚠ No records for {hospital}. Skipping. "
+                  f"(Check {results_root}/seed_*/{hospital}/search/...)")
+            summary_rows.append({"hospital": hospital, "n_records": 0, "status": "skipped"})
+            continue
 
-    print(f"\n[2/6] Efficiency table — MAS@{args.mas_budget} vs baselines@{args.baseline_budget}")
-    df_eff = build_efficiency_table(
-        results_root, args.hospital, records,
-        out_dir / "efficiency_table.csv",
-        mas_budget=args.mas_budget, baseline_budget=args.baseline_budget,
-    )
-    if len(df_eff) > 0:
-        print(df_eff.to_string(index=False))
-    else:
-        print("  (empty — no search.csv found at expected path)")
+        suf = f"_{hospital}"
 
-    print("\n[3/6] Supplementary table — all 4 metrics")
-    df_supp = build_supp_table(records, out_dir / "supp_table.csv")
-    print(f"  Rows: {len(df_supp)}  →  {out_dir / 'supp_table.csv'}")
+        print(f"\n[1/7] {hospital} — Main table (AUPRC mean ± std)")
+        df_main = build_main_table(records, out_dir / f"main_table{suf}.csv")
+        print(df_main.to_string(index=False))
 
-    print("\n[4/6] Architecture table — selected models' size/FLOPs")
-    df_arch = build_arch_table(records, out_dir / "arch_table.csv")
-    print(df_arch.to_string(index=False))
+        print(f"\n[2/7] {hospital} — Efficiency table (MAS@{args.mas_budget} vs baselines@{args.baseline_budget})")
+        df_eff = build_efficiency_table(
+            results_root, hospital, records,
+            out_dir / f"efficiency_table{suf}.csv",
+            mas_budget=args.mas_budget, baseline_budget=args.baseline_budget,
+        )
+        if len(df_eff) > 0:
+            print(df_eff.to_string(index=False))
+        else:
+            print("  (empty — no search.csv found at expected path)")
 
-    print("\n[5/6] Cost table — wall-clock + LLM calls (full budget)")
-    df_cost = build_cost_table(records, out_dir / "cost_table.csv")
-    print(df_cost.to_string(index=False))
+        print(f"\n[3/7] {hospital} — Supplementary table (all 4 metrics)")
+        df_supp = build_supp_table(records, out_dir / f"supp_table{suf}.csv")
+        print(f"  Rows: {len(df_supp)}  →  {out_dir / f'supp_table{suf}.csv'}")
 
-    print("\n[6/7] Significance table — Wilcoxon w/ Holm-Bonferroni")
-    df_sig = build_significance_table(records, out_dir / "significance.csv")
-    print(f"  Rows: {len(df_sig)}  →  {out_dir / 'significance.csv'}")
-    if len(df_sig) > 0:
-        print("  Sample rows:")
-        print(df_sig.head(10).to_string(index=False))
+        print(f"\n[4/7] {hospital} — Architecture table (selected models' size/FLOPs)")
+        df_arch = build_arch_table(records, out_dir / f"arch_table{suf}.csv")
+        print(df_arch.to_string(index=False))
 
-    print("\n[7/7] Layer ablation table — MAS-exact vs L1-only vs LOTO vs cold vs best-baseline")
-    df_loto = build_loto_ablation_table(records, out_dir / "loto_ablation_table.csv")
-    if len(df_loto) > 0:
-        cols_to_show = [
-            "task",
-            "mas_exact_mean_pct", "mas_layer1_only_mean_pct",
-            "mas_loto_mean_pct", "mas_cold_mean_pct",
-            "best_baseline_method", "best_baseline_mean_pct",
-            "delta_layer1_only_vs_exact",   # ★ Layer 2's incremental contribution
-            "delta_loto_vs_exact",
-        ]
-        cols_to_show = [c for c in cols_to_show if c in df_loto.columns]
-        print(df_loto[cols_to_show].to_string(index=False))
-    else:
-        print("  (empty — no MAS or LLM-baseline records found yet)")
+        print(f"\n[5/7] {hospital} — Cost table (wall-clock + LLM calls, full budget)")
+        df_cost = build_cost_table(records, out_dir / f"cost_table{suf}.csv")
+        print(df_cost.to_string(index=False))
 
-    print(f"\n✓ All 7 tables saved to {out_dir}/")
-    print("  - main_table.csv           (Table 1, paper main)")
-    print("  - efficiency_table.csv     (Table 2, paper main: MAS@30 vs baselines@100)")
-    print("  - loto_ablation_table.csv  (Fig 5 companion: LOTO + cold-start robustness)")
-    print("  - supp_table.csv           (Supplementary)")
-    print("  - arch_table.csv           (size constraint audit)")
-    print("  - cost_table.csv           (compute fairness audit, full budget)")
-    print("  - significance.csv         (Wilcoxon + Holm-Bonferroni)")
+        print(f"\n[6/7] {hospital} — Significance table (Wilcoxon + Holm-Bonferroni)")
+        df_sig = build_significance_table(records, out_dir / f"significance{suf}.csv")
+        print(f"  Rows: {len(df_sig)}  →  {out_dir / f'significance{suf}.csv'}")
+        if len(df_sig) > 0:
+            print("  Sample rows:")
+            print(df_sig.head(10).to_string(index=False))
+
+        print(f"\n[7/7] {hospital} — Layer ablation table (MAS-exact / L1-only / LOTO / cold / best-baseline)")
+        df_loto = build_loto_ablation_table(records, out_dir / f"loto_ablation_table{suf}.csv")
+        if len(df_loto) > 0:
+            cols_to_show = [
+                "task",
+                "mas_exact_mean_pct", "mas_layer1_only_mean_pct",
+                "mas_loto_mean_pct", "mas_cold_mean_pct",
+                "best_baseline_method", "best_baseline_mean_pct",
+                "delta_layer1_only_vs_exact",   # ★ Layer 2's incremental contribution
+                "delta_loto_vs_exact",
+            ]
+            cols_to_show = [c for c in cols_to_show if c in df_loto.columns]
+            print(df_loto[cols_to_show].to_string(index=False))
+        else:
+            print("  (empty — no MAS or LLM-baseline records found yet)")
+
+        summary_rows.append({"hospital": hospital, "n_records": len(records), "status": "ok"})
+
+    # Final cross-hospital summary
+    print("\n" + "=" * 70)
+    print("=== ALL HOSPITALS COMPLETE")
+    print("=" * 70)
+    for r in summary_rows:
+        print(f"  {r['hospital']:<20s}  records={r['n_records']:<6d}  [{r['status']}]")
+    print(f"\n✓ Per-hospital outputs saved to {out_dir}/")
+    print(f"  For each hospital <H>, the following 7 files are written:")
+    print(f"    main_table_<H>.csv           (Table 1)")
+    print(f"    efficiency_table_<H>.csv     (Table 2: MAS@30 vs baselines@100)")
+    print(f"    loto_ablation_table_<H>.csv  (Fig 5 companion)")
+    print(f"    supp_table_<H>.csv           (Supplementary)")
+    print(f"    arch_table_<H>.csv           (size constraint audit)")
+    print(f"    cost_table_<H>.csv           (compute fairness audit)")
+    print(f"    significance_<H>.csv         (Wilcoxon + Holm-Bonferroni)")
 
 
 if __name__ == "__main__":

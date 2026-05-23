@@ -13,8 +13,8 @@ Outputs to <out_dir>:
                                                  curves with mean ± std over seeds.
 
 Usage:
-    python analyze/plot_search_trajectory.py --hospital MIMIC-IV
-    python analyze/plot_search_trajectory.py --hospital MIMIC-IV --metric val_auroc
+    python analyze/plot_search_trajectory.py --hospitals MIMIC-IV
+    python analyze/plot_search_trajectory.py --hospitals MIMIC-III MIMIC-IV --metric val_auroc
 """
 from __future__ import annotations
 
@@ -167,8 +167,9 @@ def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--results_root", type=str, default="./results",
                    help="Root containing seed_<N>/ subdirectories.")
-    p.add_argument("--hospital", type=str, required=True,
-                   help="Hospital name (e.g. MIMIC-IV).")
+    p.add_argument("--hospitals", type=str, nargs="+", required=True,
+                   help="One or more hospital names (e.g. MIMIC-III MIMIC-IV). "
+                        "Each hospital produces its own PNG with _<hospital> suffix.")
     p.add_argument("--out_dir", type=str, default="./analyze",
                    help="Output directory for the figure.")
     p.add_argument("--metric", type=str, default="val_auprc",
@@ -180,35 +181,41 @@ def main():
     out_dir = Path(args.out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[Trajectory] hospital={args.hospital}  metric={args.metric}")
-    print(f"[Trajectory] reading from {results_root}/seed_*/{args.hospital}/search/...")
-    records = load_search_records(results_root, args.hospital)
-    print(f"[Trajectory] loaded {len(records)} (method, task, seed) records")
+    print(f"[Trajectory] hospitals={args.hospitals}  metric={args.metric}")
+    print(f"[Trajectory] out_dir={out_dir}\n")
 
-    if not records:
-        print("⚠ No records found. Check --results_root and that baseline/mas jobs have produced search.csv.")
-        return
+    # Per-hospital trajectory figure. Each hospital is independent — its own
+    # records dict (loaded from seed_*/<H>/search/), own panel grid, own PNG.
+    # Suffix _<hospital> on output so cross-hospital runs don't overwrite.
+    for hospital in args.hospitals:
+        print(f"=== Hospital: {hospital}")
+        print(f"  reading from {results_root}/seed_*/{hospital}/search/...")
+        records = load_search_records(results_root, hospital)
+        print(f"  loaded {len(records)} (method, task, seed) records")
 
-    # Find global max iter for consistent x-axis if needed
-    max_iter_global = max(len(df) for df in records.values())
+        if not records:
+            print(f"  ⚠ No records for {hospital}. Skipping.\n")
+            continue
 
-    fig, axes = plt.subplots(1, len(TASKS), figsize=(4.5 * len(TASKS), 4.5), sharey=False)
-    if len(TASKS) == 1:
-        axes = [axes]
+        max_iter_global = max(len(df) for df in records.values())
 
-    for ax, task in zip(axes, TASKS):
-        plot_trajectory_panel(ax, records, task, args.metric, max_iter_global)
+        fig, axes = plt.subplots(1, len(TASKS), figsize=(4.5 * len(TASKS), 4.5), sharey=False)
+        if len(TASKS) == 1:
+            axes = [axes]
 
-    fig.suptitle(
-        f"Search trajectory — {args.hospital} ({args.metric.replace('val_', '').upper()})",
-        fontsize=13, y=1.02,
-    )
-    plt.tight_layout()
+        for ax, task in zip(axes, TASKS):
+            plot_trajectory_panel(ax, records, task, args.metric, max_iter_global)
 
-    out_path = out_dir / f"figure1_search_trajectory_{args.metric}.png"
-    plt.savefig(out_path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"\n✓ Saved {out_path}")
+        fig.suptitle(
+            f"Search trajectory — {hospital} ({args.metric.replace('val_', '').upper()})",
+            fontsize=13, y=1.02,
+        )
+        plt.tight_layout()
+
+        out_path = out_dir / f"figure1_search_trajectory_{args.metric}_{hospital}.png"
+        plt.savefig(out_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  ✓ Saved {out_path}\n")
 
 
 if __name__ == "__main__":

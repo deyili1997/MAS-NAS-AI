@@ -15,7 +15,8 @@ Outputs to <out_dir>:
                           dashed line.
 
 Usage:
-    python analyze/plot_pareto.py --hospital MIMIC-IV
+    python analyze/plot_pareto.py --hospitals MIMIC-IV
+    python analyze/plot_pareto.py --hospitals MIMIC-III MIMIC-IV
 """
 from __future__ import annotations
 
@@ -192,8 +193,9 @@ def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--results_root", type=str, default="./results",
                    help="Root containing seed_<N>/ subdirectories.")
-    p.add_argument("--hospital", type=str, required=True,
-                   help="Hospital name (e.g. MIMIC-IV).")
+    p.add_argument("--hospitals", type=str, nargs="+", required=True,
+                   help="One or more hospital names (e.g. MIMIC-III MIMIC-IV). "
+                        "Each hospital produces its own PNG with _<hospital> suffix.")
     p.add_argument("--out_dir", type=str, default="./analyze",
                    help="Output directory for the figure.")
     args = p.parse_args()
@@ -202,33 +204,39 @@ def main():
     out_dir = Path(args.out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[Pareto] hospital={args.hospital}")
-    print(f"[Pareto] reading from {results_root}/seed_*/{args.hospital}/search/...")
-    records = load_search_records(results_root, args.hospital)
-    print(f"[Pareto] loaded {len(records)} (method, task, seed) records")
+    print(f"[Pareto] hospitals={args.hospitals}")
+    print(f"[Pareto] out_dir={out_dir}\n")
 
-    if not records:
-        print("⚠ No records found. Check --results_root and that baseline/mas jobs have produced search.csv.")
-        return
+    # Per-hospital Pareto front. Same panel grid per hospital, separate PNG
+    # (figure2_pareto_<hospital>.png) so cross-hospital runs don't overwrite.
+    for hospital in args.hospitals:
+        print(f"=== Hospital: {hospital}")
+        print(f"  reading from {results_root}/seed_*/{hospital}/search/...")
+        records = load_search_records(results_root, hospital)
+        print(f"  loaded {len(records)} (method, task, seed) records")
 
-    fig, axes = plt.subplots(1, len(TASKS), figsize=(4.5 * len(TASKS), 4.5), sharey=False)
-    if len(TASKS) == 1:
-        axes = [axes]
+        if not records:
+            print(f"  ⚠ No records for {hospital}. Skipping.\n")
+            continue
 
-    for ax, task in zip(axes, TASKS):
-        plot_pareto_panel(ax, records, task)
+        fig, axes = plt.subplots(1, len(TASKS), figsize=(4.5 * len(TASKS), 4.5), sharey=False)
+        if len(TASKS) == 1:
+            axes = [axes]
 
-    fig.suptitle(
-        f"Pareto front: # parameters vs validation AUPRC (per evaluated arch) — {args.hospital}\n"
-        f"Note: AUPRC here is from search-time validation, not test (only the chosen arch is test-evaluated).",
-        fontsize=11, y=1.04,
-    )
-    plt.tight_layout()
+        for ax, task in zip(axes, TASKS):
+            plot_pareto_panel(ax, records, task)
 
-    out_path = out_dir / "figure2_pareto.png"
-    plt.savefig(out_path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"\n✓ Saved {out_path}")
+        fig.suptitle(
+            f"Pareto front: # parameters vs validation AUPRC (per evaluated arch) — {hospital}\n"
+            f"Note: AUPRC here is from search-time validation, not test (only the chosen arch is test-evaluated).",
+            fontsize=11, y=1.04,
+        )
+        plt.tight_layout()
+
+        out_path = out_dir / f"figure2_pareto_{hospital}.png"
+        plt.savefig(out_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  ✓ Saved {out_path}\n")
 
 
 if __name__ == "__main__":

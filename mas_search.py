@@ -1037,9 +1037,17 @@ def main():
     pd.DataFrame([best_row]).to_csv(test_csv_path, index=False)
     print(f"\n  Best architecture + test results saved to {test_csv_path}")
 
-    # Run-level metadata for cost / fairness audit
+    # Run-level metadata for cost / fairness audit + Fig 6 source-hospital choice analysis.
+    # matched_source_* / matched_task* fields are sourced from `context` (built by
+    # gather_historical_context). For cold-start runs (--no_history) these are None /
+    # empty strings — Fig 6 plot script handles that branch (cold runs are excluded
+    # from the source-hospital distribution heatmap).
+    _matched_src = context.get("similar_hospital")
+    _matched_src_sim = context.get("similarity_score")
+    _matched_task = context.get("matched_task")
+    _matched_task_sim = context.get("matched_task_similarity")
     meta = {
-        "method": method_name,        # mas / mas_loto / mas_cold (from _method_name(args))
+        "method": method_name,        # mas / mas_layer1_only / mas_loto / mas_cold (from _method_name(args))
         "hospital": args.hospital,
         "task": args.task,
         "seed": int(args.seed),
@@ -1048,6 +1056,11 @@ def main():
         "ckpt_used": str(ckpt_path),
         "wall_clock_sec": time.perf_counter() - t_start,
         "llm_calls": _llm_get(),  # sum across proposal + experiment + critic agents
+        # ★ NEW (Fig 6): which source hospital did Layer 1 cosine pick?
+        "matched_source_hospital": _matched_src,
+        "matched_source_similarity": float(_matched_src_sim) if _matched_src_sim is not None else None,
+        "matched_task": _matched_task,
+        "matched_task_similarity": float(_matched_task_sim) if _matched_task_sim is not None else None,
     }
     with open(output_dir / "search_meta.json", "w") as f:
         json.dump(meta, f, indent=2)
