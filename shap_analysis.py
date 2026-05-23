@@ -34,8 +34,12 @@ def parse_args():
     p.add_argument("--results_dir", type=str, default="./results",
                    help="Root results directory containing per-hospital metadata.csv files. "
                         "Globs <results_dir>/*/metadata.csv for source data.")
-    p.add_argument("--output_dir", type=str, default="./results/shap_analysis",
+    p.add_argument("--output_dir", type=str, default=None,
                    help="Where to write per-task SHAP outputs. "
+                        "DEFAULT: <results_dir>/shap_analysis (auto-aligned with input). "
+                        "Pass explicitly only to override that placement — passing the "
+                        "wrong path is a known trap because run_meta_regression.py "
+                        "reads from this same path. "
                         "Layout: <output_dir>/<task>/{shap_summary.png, shap_bar.png, "
                         "shap_with_regression.png, shap_interaction_*.png, "
                         "shap_values.csv, mean_abs_shap.csv}.")
@@ -318,6 +322,16 @@ def _save_shap_interaction(X, shap_values, group_name, output_dir, main_feature=
 
 def main():
     args = parse_args()
+
+    # Resolve default --output_dir = <results_dir>/shap_analysis so the SHAP
+    # outputs always land next to the input metadata. Avoids the "wrote to
+    # local ./results/ but run_meta_regression reads from /blue/.../" trap
+    # where mismatched paths silently make meta-regression read stale files.
+    if args.output_dir is None:
+        args.output_dir = str(Path(args.results_dir) / "shap_analysis")
+        print(f"  [Auto] --output_dir not set → using {args.output_dir} "
+              f"(aligned with --results_dir).")
+
     df = load_metadata(args.results_dir, args.hospitals)
     df = prepare_features(df)
 

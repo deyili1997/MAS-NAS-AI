@@ -25,9 +25,13 @@ Pipeline (per task):
        architecture_prior.json    LLM agent-facing summary (preferred/discouraged + interaction rules + caveat)
 
 Usage:
-    python run_meta_regression.py
-    python run_meta_regression.py --shap_dir ./results/shap_analysis \\
-                                  --output_dir ./results/meta_regression
+    # Recommended: pass --results_dir; shap_dir/output_dir auto-resolve under it.
+    python run_meta_regression.py --results_dir /blue/.../MAS-NAS/results
+
+    # Equivalent (explicit paths):
+    python run_meta_regression.py \\
+        --shap_dir   /blue/.../MAS-NAS/results/shap_analysis \\
+        --output_dir /blue/.../MAS-NAS/results/meta_regression
 """
 from __future__ import annotations
 
@@ -415,11 +419,18 @@ def run_meta_regression_for_task(task: str, shap_csv: Path, out_dir: Path) -> di
 def parse_args():
     p = argparse.ArgumentParser(
         description="Layer 2 architecture-effect prior generator (Meta-Regression).")
-    p.add_argument("--shap_dir", type=str, default="./results/shap_analysis",
+    p.add_argument("--results_dir", type=str, default="./results",
+                   help="Convenience: if --shap_dir / --output_dir are not explicitly "
+                        "set, they default to <results_dir>/shap_analysis and "
+                        "<results_dir>/meta_regression respectively. Keeps shap_analysis.py "
+                        "and run_meta_regression.py reading/writing the same root.")
+    p.add_argument("--shap_dir", type=str, default=None,
                    help="Directory containing per-task shap_values.csv "
-                        "(produced by shap_analysis.py with --hospitals flag).")
-    p.add_argument("--output_dir", type=str, default="./results/meta_regression",
-                   help="Where to write per-task meta-regression artifacts.")
+                        "(produced by shap_analysis.py with --hospitals flag). "
+                        "DEFAULT: <results_dir>/shap_analysis.")
+    p.add_argument("--output_dir", type=str, default=None,
+                   help="Where to write per-task meta-regression artifacts. "
+                        "DEFAULT: <results_dir>/meta_regression.")
     p.add_argument("--tasks", type=str, nargs="+", default=None,
                    help="Optional subset of tasks to run. Default: all subdirs of --shap_dir.")
     return p.parse_args()
@@ -427,6 +438,18 @@ def parse_args():
 
 def main():
     args = parse_args()
+
+    # Resolve defaults from --results_dir so this script and shap_analysis.py
+    # always read/write the same root (otherwise stale shap_values.csv from a
+    # mismatched path silently produce wrong priors — see the "n=10 rows from
+    # 1 hospital" failure mode).
+    if args.shap_dir is None:
+        args.shap_dir = str(Path(args.results_dir) / "shap_analysis")
+        print(f"  [Auto] --shap_dir not set → using {args.shap_dir}")
+    if args.output_dir is None:
+        args.output_dir = str(Path(args.results_dir) / "meta_regression")
+        print(f"  [Auto] --output_dir not set → using {args.output_dir}")
+
     shap_dir = Path(args.shap_dir)
     out_dir = Path(args.output_dir)
 
