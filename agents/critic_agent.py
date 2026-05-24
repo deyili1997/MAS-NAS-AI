@@ -240,6 +240,21 @@ def critique(context, search_state, proposals, max_params, client,
         print("  No proposals to critique.")
         return [], []
 
+    # Programmatic dedup safety net: the LLM critic is *prompted* to reject
+    # duplicates of already-tried architectures, but Gemini Flash Lite (and any
+    # LLM under load) can miss matches. Build a tuple-set of completed configs
+    # once up-front; every accept path below will check membership before
+    # admitting a proposal. Tuple order matches the 4-dim search-space schema.
+    completed_tuples: set[tuple[int, int, int, int]] = {
+        (c["embed_dim"], c["depth"], c["mlp_ratio"], c["num_heads"])
+        for c in search_state.get("completed_experiments", [])
+        if all(k in c for k in ("embed_dim", "depth", "mlp_ratio", "num_heads"))
+    }
+
+    def _is_completed_dupe(cfg: dict) -> bool:
+        return (cfg["embed_dim"], cfg["depth"],
+                cfg["mlp_ratio"], cfg["num_heads"]) in completed_tuples
+
     prompt = _build_prompt(context, search_state, proposals, max_params, strategy=strategy,
                            max_flops=max_flops)
 
@@ -276,14 +291,28 @@ def critique(context, search_state, proposals, max_params, client,
     except json.JSONDecodeError as e:
         print(f"  ERROR: Failed to parse critiques: {e}")
         print(f"  Response: {response_text[:500]}")
-        # Fall back: accept all proposals as-is
+        # Fall back: accept all proposals as-is (HIGH-2: still permissive on
+        # parse failure, but the dedup safety-net below filters out any
+        # already-completed configs so we don't waste budget on duplicates).
         print("  Falling back: accepting all proposals without critique")
         accepted = []
+        rejected_with_critiques = []
         for prop in proposals:
             config = {"embed_dim": prop["embed_dim"], "depth": prop["depth"],
                       "mlp_ratio": prop["mlp_ratio"], "num_heads": prop["num_heads"]}
+            if _is_completed_dupe(config):
+                print(f"  Proposal {prop.get('proposal_idx', '?')} [REJECTED]: "
+                      f"duplicate of already-tried arch (parse-fail fallback)")
+                rejected_with_critiques.append({
+                    "proposal": config,
+                    "critique": "Exact duplicate of a completed architecture "
+                                "(LLM critic JSON parse failed; filtered by "
+                                "post-LLM dedup safety net).",
+                    "risk_tags": ["duplicate", "critic_parse_fail"],
+                })
+                continue
             accepted.append(config)
-        return accepted, []
+        return accepted, rejected_with_critiques
 
     # Process critiques
     accepted = []
@@ -323,6 +352,22 @@ def critique(context, search_state, proposals, max_params, client,
                 "proposal": config,
                 "critique": "Invalid config: constraint violation detected by validator",
                 "risk_tags": ["constraint_violation"],
+            })
+            continue
+
+        # Programmatic dedup safety net (HIGH-1): the LLM critic is prompted
+        # to reject duplicates but can miss them — especially on Gemini Flash
+        # Lite. Reject any LLM-accepted config that matches an
+        # already-completed experiment to avoid spending budget on a re-eval.
+        if _is_completed_dupe(config):
+            print(f"  Proposal {idx} [REJECTED] because duplicate of completed arch "
+                  f"(but [ACCEPTED] by LLM)")
+            rejected_with_critiques.append({
+                "proposal": config,
+                "critique": "Exact duplicate of a completed architecture "
+                            "(LLM critic missed it; filtered by post-LLM "
+                            "dedup safety net).",
+                "risk_tags": ["duplicate"],
             })
             continue
 
