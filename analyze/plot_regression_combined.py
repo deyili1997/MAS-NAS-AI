@@ -27,20 +27,21 @@ Reads (per task)
         columns: arch_idx, traditional_<metric>, autoformer_<metric>
         where <metric> ∈ {accuracy, f1, auroc, auprc}
 
-Outputs (default — both written under <results_dir>/figures/ so they sit on
-the same storage tier as the source regression CSVs; on HiPerGator that's
-/blue/<group>/.../results/figures/ rather than the small /home quota)
+Outputs (default — both written under <results_dir>/../analyze/, which is the
+project-wide convention for figures: sits as a sibling of results/ on the same
+/blue storage tier as the source regression CSVs, alongside the other paper
+figures produced by plot_pareto.py / plot_loto_ablation.py / etc.)
 -------
-    <results_dir>/figures/figure3_regression_combined.png
+    <results_dir>/../analyze/figure3_regression_combined.png
                                                 — 2 rows × 5 cols composite
                                                   figure (rows = metrics,
                                                   cols = tasks)
-    <results_dir>/figures/figure3_spearman_summary.csv
+    <results_dir>/../analyze/figure3_spearman_summary.csv
                                                 — per-(task, metric) ρ + p + n
                                                   table
 
 Override either path explicitly with --output / --summary_csv if you want the
-artefacts somewhere else (e.g. local repo's analyze/ dir for git tracking).
+artefacts somewhere else.
 
 Usage
 -----
@@ -186,20 +187,24 @@ def main() -> None:
     ap.add_argument("--hospital", type=str, default="MIMIC-IV",
                     help="Hospital whose regression results to plot (default: MIMIC-IV)")
     ap.add_argument("--output", type=Path, default=None,
-                    help="Output PNG path (default: <results_dir>/figures/figure3_regression_combined.png — "
-                         "co-located with regression CSVs on the same storage tier)")
+                    help="Output PNG path (default: <results_dir>/../analyze/"
+                         "figure3_regression_combined.png — same /blue/<group>/.../analyze/ "
+                         "dir as the other paper figures)")
     ap.add_argument("--summary_csv", type=Path, default=None,
-                    help="Output Spearman summary CSV (default: <results_dir>/figures/figure3_spearman_summary.csv)")
+                    help="Output Spearman summary CSV (default: <results_dir>/../analyze/"
+                         "figure3_spearman_summary.csv)")
     args = ap.parse_args()
 
     # Resolve None defaults *after* parsing so they can follow `--results_dir`.
-    # On HiPerGator this puts artefacts under /blue/<group>/.../results/figures/
-    # rather than the small /home quota, matching the convention used by the
-    # rest of the pipeline.
+    # Convention: paper figures live under <project_root>/analyze/, which on
+    # HiPerGator is /blue/<group>/lideyi/MAS-NAS/analyze/ — a sibling of
+    # results/ on the same /blue tier, matching plot_pareto.py / plot_loto_*
+    # and avoiding the small /home quota.
+    project_root = args.results_dir.parent
     if args.output is None:
-        args.output = args.results_dir / "figures" / "figure3_regression_combined.png"
+        args.output = project_root / "analyze" / "figure3_regression_combined.png"
     if args.summary_csv is None:
-        args.summary_csv = args.results_dir / "figures" / "figure3_spearman_summary.csv"
+        args.summary_csv = project_root / "analyze" / "figure3_spearman_summary.csv"
 
     # Load every (task) regression CSV up-front so we can fail fast if anything
     # is missing rather than producing a half-rendered figure.
