@@ -565,7 +565,7 @@ def parse_args():
     p.add_argument("--mlp_ratio", type=float, default=8)
 
     # LLM settings
-    p.add_argument("--model", type=str, default="claude-haiku-4-5-20251001",
+    p.add_argument("--model", type=str, default="anthropic/claude-haiku-4.5",
                    help="Claude model ID for LLM agents")
 
     # Finetune hyperparams
@@ -715,9 +715,9 @@ def main():
                              collate_fn=batcher(tokenizer, mode="finetune"),
                              shuffle=False, **dl_kwargs)
 
-    # --- Initialize Anthropic client ---
-    import anthropic
-    client = anthropic.Anthropic()
+    # --- Initialize LLM client (OpenRouter, with Anthropic-shaped API surface) ---
+    from utils.llm_client import OpenRouterClient
+    client = OpenRouterClient()
 
     # =============================================
     # Historical Context (runs once)

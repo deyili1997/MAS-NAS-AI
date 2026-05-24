@@ -367,7 +367,7 @@ def parse_args():
     p.add_argument("--drop_path_rate", type=float, default=0.1)
 
     # LLM
-    p.add_argument("--model", type=str, default="claude-haiku-4-5-20251001",
+    p.add_argument("--model", type=str, default="anthropic/claude-haiku-4.5",
                    help="Claude model ID")
 
     p.add_argument("--seed", type=int, default=123)
@@ -449,9 +449,9 @@ def main():
                              collate_fn=batcher(tokenizer, mode="finetune"),
                              shuffle=False, **dl_kwargs)
 
-    # --- Anthropic client ---
-    import anthropic
-    client = anthropic.Anthropic()
+    # --- LLM client (OpenRouter, with Anthropic-shaped API surface) ---
+    from utils.llm_client import OpenRouterClient
+    client = OpenRouterClient()
 
     # =========================================================================
     # Single-LLM search loop

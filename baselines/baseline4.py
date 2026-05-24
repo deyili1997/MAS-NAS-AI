@@ -387,7 +387,7 @@ def parse_args():
     p.add_argument("--attn_drop_rate", type=float, default=0.1)
     p.add_argument("--drop_path_rate", type=float, default=0.1)
     # LLM
-    p.add_argument("--model", type=str, default="claude-haiku-4-5-20251001",
+    p.add_argument("--model", type=str, default="anthropic/claude-haiku-4.5",
                    help="Default Claude model used for both Navigator and Generator "
                         "if not overridden separately.")
     p.add_argument("--navigator_model", type=str, default=None,
@@ -490,9 +490,9 @@ def main():
                              collate_fn=batcher(tokenizer, mode="finetune"),
                              shuffle=False, **dl_kw)
 
-    # --- LLM client ---
-    import anthropic
-    client = anthropic.Anthropic()
+    # --- LLM client (OpenRouter, with Anthropic-shaped API surface) ---
+    from utils.llm_client import OpenRouterClient
+    client = OpenRouterClient()
 
     # --- Coordinator state (Algorithm 1, line 1) ---
     visited = set()             # V

@@ -220,7 +220,7 @@ def _validate_config(config):
 
 
 def critique(context, search_state, proposals, max_params, client,
-             vocab_size=None, max_adm=8, model="claude-haiku-4-5-20251001", strategy=None,
+             vocab_size=None, max_adm=8, model="anthropic/claude-haiku-4.5", strategy=None,
              max_flops=None, flops_seq_len=512, num_classes=2):
     """
     Use Claude to critique architecture proposals.
