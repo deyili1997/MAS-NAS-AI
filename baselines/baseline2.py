@@ -367,7 +367,7 @@ def parse_args():
     p.add_argument("--drop_path_rate", type=float, default=0.1)
 
     # LLM
-    p.add_argument("--model", type=str, default="anthropic/claude-haiku-4.5",
+    p.add_argument("--model", type=str, default="google/gemini-2.5-flash-lite",
                    help="Claude model ID")
 
     p.add_argument("--seed", type=int, default=123)

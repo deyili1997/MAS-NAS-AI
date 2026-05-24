@@ -322,7 +322,7 @@ def _build_strategy_prompt(context, search_state):
     return "".join(parts)
 
 
-def decide_strategy(context, search_state, client, model="anthropic/claude-haiku-4.5"):
+def decide_strategy(context, search_state, client, model="google/gemini-2.5-flash-lite"):
     """
     Use Claude to decide the search strategy for the next round.
 

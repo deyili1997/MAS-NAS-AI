@@ -565,7 +565,7 @@ def parse_args():
     p.add_argument("--mlp_ratio", type=float, default=8)
 
     # LLM settings
-    p.add_argument("--model", type=str, default="anthropic/claude-haiku-4.5",
+    p.add_argument("--model", type=str, default="google/gemini-2.5-flash-lite",
                    help="Claude model ID for LLM agents")
 
     # Finetune hyperparams

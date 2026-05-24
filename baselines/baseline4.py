@@ -387,7 +387,7 @@ def parse_args():
     p.add_argument("--attn_drop_rate", type=float, default=0.1)
     p.add_argument("--drop_path_rate", type=float, default=0.1)
     # LLM
-    p.add_argument("--model", type=str, default="anthropic/claude-haiku-4.5",
+    p.add_argument("--model", type=str, default="google/gemini-2.5-flash-lite",
                    help="Default Claude model used for both Navigator and Generator "
                         "if not overridden separately.")
     p.add_argument("--navigator_model", type=str, default=None,
