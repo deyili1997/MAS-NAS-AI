@@ -29,7 +29,8 @@ Reads (per task)
 
 Outputs
 -------
-    analyze/figure3_regression_combined.png    — 5 rows × 2 cols composite figure
+    analyze/figure3_regression_combined.png    — 2 rows × 5 cols composite figure
+                                                  (rows = metrics, cols = tasks)
     analyze/figure3_spearman_summary.csv       — per-(task, metric) ρ + p + n table
 
 Usage
@@ -52,16 +53,19 @@ import pandas as pd
 from scipy.stats import spearmanr
 
 
-# 5-task row order (top-to-bottom). Display labels are paper-friendly.
+# 5-task column order (left-to-right). Display labels are paper-friendly and
+# kept short since they're now rendered as column headers above each pair of
+# stacked subplots.
 TASKS: list[tuple[str, str]] = [
     ("death",               "Mortality"),
-    ("stay",                "Length-of-Stay > 7d"),
+    ("stay",                "Stay > 7d"),
     ("readmission",         "Readmission (90d)"),
-    ("next_diag_6m_pheno",  "Next-Diag Phenotype (6m)"),
-    ("next_diag_12m_pheno", "Next-Diag Phenotype (12m)"),
+    ("next_diag_6m_pheno",  "Phenotype (6m)"),
+    ("next_diag_12m_pheno", "Phenotype (12m)"),
 ]
 
-# 2-metric column order. Both threshold-free, both reported in main tables.
+# 2-metric row order (top-to-bottom). Both threshold-free, both reported in
+# the main tables.
 METRICS: list[tuple[str, str]] = [
     ("auroc", "AUROC"),
     ("auprc", "AUPRC"),
@@ -160,20 +164,21 @@ def main() -> None:
             + f"\nExpected layout: {args.results_dir}/{args.hospital}/regression/<task>/results.csv"
         )
 
-    # 5 rows (tasks) × 2 cols (AUROC, AUPRC). Each subplot ~ 4.5×3.5 in.
-    n_rows = len(TASKS)
-    n_cols = len(METRICS)
+    # 2 rows (AUROC, AUPRC) × 5 cols (tasks). Wider aspect ratio fits a paper
+    # double-column figure better than the 5×2 portrait layout.
+    n_rows = len(METRICS)
+    n_cols = len(TASKS)
     fig, axes = plt.subplots(
         n_rows, n_cols,
-        figsize=(4.6 * n_cols, 3.4 * n_rows),
+        figsize=(3.8 * n_cols, 3.6 * n_rows),
         squeeze=False,
     )
 
     spearman_rows: list[dict] = []
-    for r, (task_key, task_label) in enumerate(TASKS):
-        df = per_task[task_key]
-        for c, (metric_key, metric_label) in enumerate(METRICS):
+    for r, (metric_key, metric_label) in enumerate(METRICS):
+        for c, (task_key, task_label) in enumerate(TASKS):
             ax = axes[r][c]
+            df = per_task[task_key]
             rho, pv, n = _draw_subplot(ax, df, metric_key)
             spearman_rows.append({
                 "task": task_key,
@@ -183,17 +188,17 @@ def main() -> None:
                 "n": n,
             })
 
-            # Per-subplot title only on the top row (column header); per-row
-            # task label is rendered via the y-axis label of the *left* column.
+            # Top row → task name as column header. Left column → metric name
+            # in the y-axis label (combined with "AutoFormer" axis label).
             if r == 0:
-                ax.set_title(metric_label, fontsize=13, fontweight="bold")
+                ax.set_title(task_label, fontsize=12, fontweight="bold")
             if c == 0:
                 ax.set_ylabel(
-                    f"{task_label}\n\nAutoFormer",
+                    f"{metric_label}\n\nAutoFormer",
                     fontsize=11, fontweight="bold",
                 )
             else:
-                ax.set_ylabel("AutoFormer", fontsize=10)
+                ax.set_ylabel("AutoFormer", fontsize=9)
             if r == n_rows - 1:
                 ax.set_xlabel("Traditional pretrain+finetune", fontsize=10)
 
