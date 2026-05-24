@@ -186,7 +186,7 @@ def main() -> None:
     # is missing rather than producing a half-rendered figure.
     per_task: dict[str, pd.DataFrame] = {}
     missing: list[str] = []
-    for task_key, _ in TASKS:
+    for task_key, _, _ in TASKS:
         csv_path = args.results_dir / args.hospital / "regression" / task_key / "results.csv"
         if not csv_path.exists():
             missing.append(str(csv_path))
@@ -294,7 +294,7 @@ def main() -> None:
     print(f"→ Spearman: {args.summary_csv}")
     print("\nSpearman ρ table:")
     pivot = summary.pivot(index="task", columns="metric", values="spearman_rho")
-    pivot = pivot.reindex(index=[t for t, _ in TASKS], columns=[m for m, _ in METRICS])
+    pivot = pivot.reindex(index=[t for t, _, _ in TASKS], columns=[m for m, _ in METRICS])
     print(pivot.round(3).to_string())
 
 
