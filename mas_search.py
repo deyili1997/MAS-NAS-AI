@@ -565,7 +565,7 @@ def parse_args():
     p.add_argument("--mlp_ratio", type=float, default=8)
 
     # LLM settings
-    p.add_argument("--model", type=str, default="claude-sonnet-4-6",
+    p.add_argument("--model", type=str, default="claude-3-haiku-20240307",
                    help="Claude model ID for LLM agents")
 
     # Finetune hyperparams

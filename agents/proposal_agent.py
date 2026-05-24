@@ -312,7 +312,7 @@ def _call_llm(prompt, client, model, max_retries=5):
     return valid_proposals
 
 
-def propose(context, search_state, max_params, client, model="claude-sonnet-4-6",
+def propose(context, search_state, max_params, client, model="claude-3-haiku-20240307",
             strategy=None, max_flops=None):
     """
     Use Claude to propose new architectures.
@@ -419,7 +419,7 @@ def _build_revision_prompt(context, search_state, rejected_with_critiques, max_p
 
 
 def revise(context, search_state, rejected_with_critiques, max_params, client,
-           model="claude-sonnet-4-6", strategy=None, max_flops=None):
+           model="claude-3-haiku-20240307", strategy=None, max_flops=None):
     """
     Use Claude to revise rejected proposals based on critic feedback.
 

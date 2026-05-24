@@ -75,12 +75,12 @@ case $BL in
   1) python baselines/baseline1.py "${COMMON_ARGS[@]}" --budget 100 \
         --population_num 8 --select_num 4 --mutation_num 4 --crossover_num 4 --m_prob 0.3 ;;
   2) python baselines/baseline2.py "${COMMON_ARGS[@]}" --budget 100 \
-        --model claude-sonnet-4-5 ;;
+        --model claude-3-haiku-20240307 ;;
   3) python baselines/baseline3.py "${COMMON_ARGS[@]}" --budget 100 \
-        --model claude-sonnet-4-5 --temperature 0.7 \
+        --model claude-3-haiku-20240307 --temperature 0.7 \
         --n_niches 16 --random_init_frac 0.3 --mutation_prob 0.85 --temp_jitter 0.1 --top_n_select 3 ;;
   4) python baselines/baseline4.py "${COMMON_ARGS[@]}" --budget 100 \
-        --model claude-sonnet-4-5 \
+        --model claude-3-haiku-20240307 \
         --navigator_temperature 0.7 --generator_temperature 0.7 --candidates_per_iter 3 ;;
   mas) python mas_search.py "${COMMON_ARGS[@]}" --budget 100 ;;
   mas_loto) python mas_search.py "${COMMON_ARGS[@]}" --budget 100 --exclude_exact_task_from_history ;;
