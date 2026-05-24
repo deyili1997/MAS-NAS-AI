@@ -48,7 +48,6 @@ COMMON_ARGS=(
     --flops_seq_len 512
     --ckpt_path $CKPT
     --results_dir $RESULTS_DIR
-    --history_root $HISTORY_ROOT
     --pretrain_epochs 100
     --pretrain_patience 5
     --embed_dim 256
@@ -70,6 +69,10 @@ COMMON_ARGS=(
     --cudnn_benchmark
 )
 
+# --history_root is consumed only by mas_search.py (Layer 1 / Layer 2 prior
+# loading paths). Baselines 0-4 don't define this argparse flag.
+MAS_EXTRA=(--history_root $HISTORY_ROOT)
+
 case $BL in
   0) python baselines/baseline0.py "${COMMON_ARGS[@]}" --budget 100 ;;
   1) python baselines/baseline1.py "${COMMON_ARGS[@]}" --budget 100 \
@@ -82,10 +85,10 @@ case $BL in
   4) python baselines/baseline4.py "${COMMON_ARGS[@]}" --budget 100 \
         --model google/gemini-2.5-flash-lite \
         --navigator_temperature 0.7 --generator_temperature 0.7 --candidates_per_iter 3 ;;
-  mas) python mas_search.py "${COMMON_ARGS[@]}" --budget 100 ;;
-  mas_loto) python mas_search.py "${COMMON_ARGS[@]}" --budget 100 --exclude_exact_task_from_history ;;
-  mas_cold) python mas_search.py "${COMMON_ARGS[@]}" --budget 100 --no_history ;;
-  mas_layer1_only) python mas_search.py "${COMMON_ARGS[@]}" --budget 100 --no_meta_regression ;;
+  mas) python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget 100 ;;
+  mas_loto) python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget 100 --exclude_exact_task_from_history ;;
+  mas_cold) python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget 100 --no_history ;;
+  mas_layer1_only) python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget 100 --no_meta_regression ;;
   *) echo "Unknown baseline: $BL"; exit 1 ;;
 esac
 

@@ -95,7 +95,6 @@ COMMON_ARGS=(
     --flops_seq_len 512
     --ckpt_path $CKPT
     --results_dir $RESULTS_DIR
-    --history_root $HISTORY_ROOT
     --pretrain_epochs 100
     --pretrain_patience 5
     --embed_dim 256
@@ -116,6 +115,12 @@ COMMON_ARGS=(
     --num_workers 4
     --cudnn_benchmark
 )
+
+# --history_root is consumed only by mas_search.py (Layer 1 / Layer 2 prior
+# loading paths). Baselines 0-4 don't define this argparse flag and would
+# crash with "unrecognized arguments" if it leaked through COMMON_ARGS. Keep
+# it scoped to the mas variants only.
+MAS_EXTRA=(--history_root $HISTORY_ROOT)
 
 case "$METHOD" in
   baseline0)
@@ -140,16 +145,16 @@ case "$METHOD" in
         --navigator_temperature 0.7 --generator_temperature 0.7 --candidates_per_iter 3
     ;;
   mas)
-    python mas_search.py "${COMMON_ARGS[@]}" --budget 100
+    python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget 100
     ;;
   mas_loto)
-    python mas_search.py "${COMMON_ARGS[@]}" --budget 100 --exclude_exact_task_from_history
+    python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget 100 --exclude_exact_task_from_history
     ;;
   mas_cold)
-    python mas_search.py "${COMMON_ARGS[@]}" --budget 100 --no_history
+    python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget 100 --no_history
     ;;
   mas_layer1_only)
-    python mas_search.py "${COMMON_ARGS[@]}" --budget 100 --no_meta_regression
+    python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget 100 --no_meta_regression
     ;;
   *)
     echo "ERROR: Unknown METHOD '$METHOD' (TSV line $SLURM_ARRAY_TASK_ID)"
