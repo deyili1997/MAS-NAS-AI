@@ -28,7 +28,17 @@ import pickle
 import time
 
 from dotenv import load_dotenv
-load_dotenv(override=True)
+# Load .env from several likely locations so OPENROUTER_API_KEY is found
+# regardless of where the user runs from. Matches the multi-location fallback
+# used by baselines/baseline{2,3,4}.py — defends against the case where a
+# future sbatch (or interactive shell) doesn't `cd` into the project root
+# before invoking python.
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+for _env_dir in (os.getcwd(), _THIS_DIR):
+    _env_path = os.path.join(_env_dir, ".env")
+    if os.path.exists(_env_path):
+        load_dotenv(_env_path, override=True)
+        break
 
 import numpy as np
 import pandas as pd
