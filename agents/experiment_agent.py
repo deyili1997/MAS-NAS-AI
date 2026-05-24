@@ -322,7 +322,7 @@ def _build_strategy_prompt(context, search_state):
     return "".join(parts)
 
 
-def decide_strategy(context, search_state, client, model="claude-3-haiku-20240307"):
+def decide_strategy(context, search_state, client, model="claude-haiku-4-5-20251001"):
     """
     Use Claude to decide the search strategy for the next round.
 

@@ -445,7 +445,7 @@ def parse_args():
     p.add_argument("--attn_drop_rate", type=float, default=0.1)
     p.add_argument("--drop_path_rate", type=float, default=0.1)
     # LLM
-    p.add_argument("--model", type=str, default="claude-3-haiku-20240307")
+    p.add_argument("--model", type=str, default="claude-haiku-4-5-20251001")
     p.add_argument("--temperature", type=float, default=0.7,
                    help="Initial LLM sampling temperature")
     # Quality-Diversity specifics
