@@ -91,7 +91,18 @@ class _MessagesAPI:
             **extra_kwargs: forwarded to openai .chat.completions.create
                 (e.g. temperature, top_p, stop). Most agent code does not set
                 these, but baselines occasionally do (see baseline3/4).
+
+        Anthropic → OpenAI translation:
+            - Anthropic puts the system instruction in a top-level `system=`
+              keyword arg. OpenAI/OpenRouter expect a system message at the
+              head of `messages`. baseline4 (and any Anthropic-shape caller)
+              uses the former; we extract it here and prepend it to messages,
+              so the rest of the call site stays Anthropic-shaped.
         """
+        system_prompt = extra_kwargs.pop("system", None)
+        if system_prompt:
+            messages = [{"role": "system", "content": system_prompt}, *messages]
+
         completion = self._client.chat.completions.create(
             model=model,
             max_tokens=max_tokens,
