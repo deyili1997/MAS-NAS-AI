@@ -13,6 +13,7 @@ import time
 
 import numpy as np
 
+from agents.search_space import CHOICES
 from utils.tracer import get_tracer
 from utils.llm_counter import increment as _llm_increment
 
@@ -26,14 +27,6 @@ def _np_default(obj):
     if isinstance(obj, np.ndarray):
         return obj.tolist()
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
-
-
-CHOICES = {
-    "mlp_ratio": [1, 2, 4, 8],
-    "num_heads": [1, 2, 4, 8],
-    "embed_dim": [32, 64, 128, 256],
-    "depth": [1, 2, 4, 8],
-}
 
 
 def _build_prompt(context, search_state, max_params, strategy=None, max_flops=None):
@@ -258,17 +251,17 @@ def _validate_proposal(proposal):
     return True, "ok"
 
 
-def _call_llm(prompt, client, model, max_retries=5):
-    """Call Claude and parse the response into a list of proposals."""
+def _api_call(prompt, client, model, max_tokens=4096, max_retries=5):
+    """LLM API call with retry on transient errors."""
     for attempt in range(max_retries):
         try:
             _llm_increment()
             response = client.messages.create(
                 model=model,
-                max_tokens=4096,
+                max_tokens=max_tokens,
                 messages=[{"role": "user", "content": prompt}],
             )
-            break
+            return response.content[0].text
         except Exception as e:
             if attempt < max_retries - 1:
                 wait = 2 ** attempt
@@ -277,22 +270,31 @@ def _call_llm(prompt, client, model, max_retries=5):
             else:
                 raise
 
-    response_text = response.content[0].text
-    print(f"  Raw LLM response length: {len(response_text)} chars")
 
-    # Trace LLM prompt/response
-    tracer = get_tracer()
-    if tracer:
-        tracer.log_subsection("LLM Call")
-        tracer.log_prompt(prompt)
-        tracer.log_response(response_text)
+def _call_llm(prompt, client, model, max_retries=5, max_parse_retries=1):
+    """Call Claude and parse the response into a list of proposals."""
+    last_error = None
+    for parse_attempt in range(max_parse_retries + 1):
+        response_text = _api_call(prompt, client, model, max_retries=max_retries)
+        print(f"  Raw LLM response length: {len(response_text)} chars")
 
-    try:
-        proposals = _parse_proposals(response_text)
-    except json.JSONDecodeError as e:
-        print(f"  ERROR: Failed to parse proposals: {e}")
-        print(f"  Response: {response_text[:500]}")
-        return []
+        tracer = get_tracer()
+        if tracer:
+            tracer.log_subsection("LLM Call")
+            tracer.log_prompt(prompt)
+            tracer.log_response(response_text)
+
+        try:
+            proposals = _parse_proposals(response_text)
+            break
+        except json.JSONDecodeError as e:
+            last_error = e
+            if parse_attempt < max_parse_retries:
+                print(f"  Parse failed (attempt {parse_attempt+1}), retrying LLM call...")
+                continue
+            print(f"  ERROR: Failed to parse proposals after {max_parse_retries+1} attempts: {last_error}")
+            print(f"  Response: {response_text[:500]}")
+            return []
 
     # Validate each proposal
     valid_proposals = []

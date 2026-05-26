@@ -322,6 +322,28 @@ def _build_strategy_prompt(context, search_state):
     return "".join(parts)
 
 
+def _parse_strategy(text):
+    """Parse strategy JSON from LLM response text. Returns dict or None."""
+    # Strip markdown code fences
+    if text.startswith("```"):
+        lines = text.split("\n")
+        lines = [l for l in lines if not l.strip().startswith("```")]
+        text = "\n".join(lines).strip()
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        decoder = json.JSONDecoder()
+        start = text.find("{")
+        if start != -1:
+            try:
+                result, _ = decoder.raw_decode(text, start)
+                return result
+            except json.JSONDecodeError:
+                return None
+        return None
+
+
 def decide_strategy(context, search_state, client, model="google/gemini-2.5-flash-lite"):
     """
     Use Claude to decide the search strategy for the next round.
@@ -333,46 +355,43 @@ def decide_strategy(context, search_state, client, model="google/gemini-2.5-flas
 
     prompt = _build_strategy_prompt(context, search_state)
 
-    max_retries = 5
-    for attempt in range(max_retries):
-        try:
-            _llm_increment()
-            response = client.messages.create(
-                model=model,
-                max_tokens=1024,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            break
-        except Exception as e:
-            if attempt < max_retries - 1:
-                wait = 2 ** attempt
-                print(f"  API error: {e}. Retrying in {wait}s...")
-                time.sleep(wait)
-            else:
-                raise
-
-    text = response.content[0].text.strip()
-
-    # Trace LLM prompt/response
-    tracer = get_tracer()
-    if tracer:
-        tracer.log_subsection("LLM Call")
-        tracer.log_prompt(prompt)
-        tracer.log_response(text)
-
-    try:
-        result = json.loads(text)
-    except json.JSONDecodeError:
-        decoder = json.JSONDecoder()
-        start = text.find("{")
-        if start != -1:
+    max_parse_retries = 1
+    for parse_attempt in range(max_parse_retries + 1):
+        max_retries = 5
+        for attempt in range(max_retries):
             try:
-                result, _ = decoder.raw_decode(text, start)
-            except json.JSONDecodeError:
-                print(f"  Failed to parse strategy response, defaulting to exploration")
-                return {"strategy": "exploration", "rationale": "parse failure fallback"}
+                _llm_increment()
+                response = client.messages.create(
+                    model=model,
+                    max_tokens=1024,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait = 2 ** attempt
+                    print(f"  API error: {e}. Retrying in {wait}s...")
+                    time.sleep(wait)
+                else:
+                    raise
+
+        text = response.content[0].text.strip()
+
+        tracer = get_tracer()
+        if tracer:
+            tracer.log_subsection("LLM Call")
+            tracer.log_prompt(prompt)
+            tracer.log_response(text)
+
+        result = _parse_strategy(text)
+        if result is not None:
+            break
+
+        if parse_attempt < max_parse_retries:
+            print(f"  Parse failed (attempt {parse_attempt+1}), retrying LLM call...")
         else:
-            print(f"  Failed to parse strategy response, defaulting to exploration")
+            print(f"  Failed to parse strategy response after {max_parse_retries+1} attempts, "
+                  f"defaulting to exploration")
             return {"strategy": "exploration", "rationale": "parse failure fallback"}
 
     strategy = result.get("strategy", "exploration")

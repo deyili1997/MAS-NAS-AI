@@ -18,6 +18,7 @@ import time
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from agents.search_space import CHOICES
 from run_pipeline import count_subnet_params, count_subnet_flops
 from utils.tracer import get_tracer
 from utils.llm_counter import increment as _llm_increment
@@ -32,14 +33,6 @@ def _np_default(obj):
     if isinstance(obj, np.ndarray):
         return obj.tolist()
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
-
-
-CHOICES = {
-    "mlp_ratio": [1, 2, 4, 8],
-    "num_heads": [1, 2, 4, 8],
-    "embed_dim": [32, 64, 128, 256],
-    "depth": [1, 2, 4, 8],
-}
 
 
 def _build_prompt(context, search_state, proposals, max_params, strategy=None,
@@ -190,13 +183,17 @@ def _parse_critiques(response_text):
         lines = [l for l in lines if not l.strip().startswith("```")]
         text = "\n".join(lines)
     try:
-        return json.loads(text)
+        result = json.loads(text)
     except json.JSONDecodeError:
         decoder = json.JSONDecoder()
         start = text.find("[")
         if start != -1:
-            return decoder.raw_decode(text, start)[0]
-        raise
+            result = decoder.raw_decode(text, start)[0]
+        else:
+            raise
+    if isinstance(result, dict):
+        result = [result]
+    return result
 
 
 def _validate_config(config):
@@ -258,42 +255,47 @@ def critique(context, search_state, proposals, max_params, client,
     prompt = _build_prompt(context, search_state, proposals, max_params, strategy=strategy,
                            max_flops=max_flops)
 
-    max_retries = 5
-    for attempt in range(max_retries):
+    max_parse_retries = 1
+    critiques = None
+    for parse_attempt in range(max_parse_retries + 1):
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                _llm_increment()
+                response = client.messages.create(
+                    model=model,
+                    max_tokens=4096,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait = 2 ** attempt
+                    print(f"  API error: {e}. Retrying in {wait}s...")
+                    time.sleep(wait)
+                else:
+                    raise
+
+        response_text = response.content[0].text
+        print(f"  Raw LLM response length: {len(response_text)} chars")
+
+        tracer = get_tracer()
+        if tracer:
+            tracer.log_subsection("LLM Call")
+            tracer.log_prompt(prompt)
+            tracer.log_response(response_text)
+
         try:
-            _llm_increment()
-            response = client.messages.create(
-                model=model,
-                max_tokens=4096,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            critiques = _parse_critiques(response_text)
             break
-        except Exception as e:
-            if attempt < max_retries - 1:
-                wait = 2 ** attempt
-                print(f"  API error: {e}. Retrying in {wait}s...")
-                time.sleep(wait)
-            else:
-                raise
+        except json.JSONDecodeError as e:
+            if parse_attempt < max_parse_retries:
+                print(f"  Parse failed (attempt {parse_attempt+1}), retrying LLM call...")
+                continue
+            print(f"  ERROR: Failed to parse critiques after {max_parse_retries+1} attempts: {e}")
+            print(f"  Response: {response_text[:500]}")
 
-    response_text = response.content[0].text
-    print(f"  Raw LLM response length: {len(response_text)} chars")
-
-    # Trace LLM prompt/response
-    tracer = get_tracer()
-    if tracer:
-        tracer.log_subsection("LLM Call")
-        tracer.log_prompt(prompt)
-        tracer.log_response(response_text)
-
-    try:
-        critiques = _parse_critiques(response_text)
-    except json.JSONDecodeError as e:
-        print(f"  ERROR: Failed to parse critiques: {e}")
-        print(f"  Response: {response_text[:500]}")
-        # Fall back: accept all proposals as-is (HIGH-2: still permissive on
-        # parse failure, but the dedup safety-net below filters out any
-        # already-completed configs so we don't waste budget on duplicates).
+    if critiques is None:
         print("  Falling back: accepting all proposals without critique")
         accepted = []
         rejected_with_critiques = []
