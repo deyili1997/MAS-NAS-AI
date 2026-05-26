@@ -138,6 +138,12 @@ def _finetune_one_arch(config, ckpt, train_loader, val_loader, device, args):
     for key in ["accuracy", "f1", "auroc", "auprc"]:
         avg_val[key] = sum(m[key] for m in top_k_val) / top_k
 
+    # Free GPU memory occupied by the just-finetuned model / optimizer / loss.
+    # Without this, 50 sequential calls accumulate stale CUDA blocks, risking
+    # OOM on L4-16 GB for later (larger) architectures.
+    del model, optimizer, criterion
+    torch.cuda.empty_cache()
+
     return avg_val, best_model_sd
 
 
@@ -242,6 +248,12 @@ def _update_best_by_composite_rank(search_state):
         print(f"\n  Best architecture (composite rank): idx={best_idx}, "
               f"embed_dim={experiments[best_idx]['embed_dim']}, "
               f"depth={experiments[best_idx]['depth']}")
+        # Free non-best model snapshots to avoid accumulating ~1 GB of CPU
+        # RAM over 50 experiments.  Keep the list length in-sync with
+        # completed_experiments so best_idx stays valid across calls.
+        for j in range(len(model_sds)):
+            if j != best_idx:
+                model_sds[j] = None
 
 
 # ---------------------------------------------------------------------------

@@ -796,158 +796,188 @@ def main():
               f"— Strategy: {strategy['strategy']}")
         print(f"{'='*60}")
 
-        # Agent 1: Propose architectures
-        tracer.log_section(f"ROUND {round_num} — AGENT 1: PROPOSAL")
-        tracer.log_subsection("Inputs")
-        tracer.log_kv("Strategy", f"{strategy['strategy']} (\"{strategy['rationale']}\")")
-        tracer.log_kv("Budget remaining", search_state["budget_remaining"])
-        tracer.log_kv("Completed exps", len(search_state["completed_experiments"]))
-        flops_str = Tracer._fmt_int(args.max_flops) if args.max_flops else "None"
-        tracer.log_kv("Constraints", f"max_params={Tracer._fmt_int(args.max_params)}  max_flops={flops_str}")
-
-        proposals = proposal_agent.propose(
-            context=context,
-            search_state=search_state,
-            max_params=args.max_params,
-            client=client,
-            model=args.model,
-            strategy=strategy,
-            max_flops=args.max_flops,
-        )
-
-        tracer.log_subsection(f"Output: {len(proposals)} Proposals")
-        tracer.log_archs("Proposals", proposals)
-
-        if not proposals:
-            consecutive_failures += 1
-            print(f"No valid proposals generated. "
-                  f"({consecutive_failures}/{max_consecutive_failures} consecutive failures)")
-            if consecutive_failures >= max_consecutive_failures:
-                print("Too many consecutive failures, stopping search.")
-                break
-            continue
-
-        # Agent 1 ↔ Agent 2: Propose-Critique-Revise loop
-        max_revision_rounds = 3
-        all_accepted = []
-
-        for revision_round in range(max_revision_rounds):
-            # Agent 2: Critique
-            tracer.log_section(f"ROUND {round_num} — AGENT 2: CRITIC (pass {revision_round+1}/{max_revision_rounds})")
+        try:
+            # Agent 1: Propose architectures
+            tracer.log_section(f"ROUND {round_num} — AGENT 1: PROPOSAL")
             tracer.log_subsection("Inputs")
-            tracer.log_kv("Reviewing", f"{len(proposals)} proposals")
-            tracer.log_kv("Strategy", strategy["strategy"])
+            tracer.log_kv("Strategy", f"{strategy['strategy']} (\"{strategy['rationale']}\")")
+            tracer.log_kv("Budget remaining", search_state["budget_remaining"])
+            tracer.log_kv("Completed exps", len(search_state["completed_experiments"]))
+            flops_str = Tracer._fmt_int(args.max_flops) if args.max_flops else "None"
+            tracer.log_kv("Constraints", f"max_params={Tracer._fmt_int(args.max_params)}  max_flops={flops_str}")
 
-            accepted, rejected = critic_agent.critique(
+            proposals = proposal_agent.propose(
                 context=context,
                 search_state=search_state,
-                proposals=proposals,
                 max_params=args.max_params,
                 client=client,
-                vocab_size=vocab_size,
-                max_adm=max_adm,
                 model=args.model,
                 strategy=strategy,
                 max_flops=args.max_flops,
-                num_classes=task_info(args.task)["num_classes"],
-                flops_seq_len=args.flops_seq_len,
             )
 
-            tracer.log_subsection("Output")
-            tracer.log_archs("Accepted", accepted)
-            tracer.log_rejected(rejected)
+            tracer.log_subsection(f"Output: {len(proposals)} Proposals")
+            tracer.log_archs("Proposals", proposals)
 
-            all_accepted.extend(accepted)
+            if not proposals:
+                consecutive_failures += 1
+                print(f"No valid proposals generated. "
+                      f"({consecutive_failures}/{max_consecutive_failures} consecutive failures)")
+                if consecutive_failures >= max_consecutive_failures:
+                    print("Too many consecutive failures, stopping search.")
+                    break
+                continue
 
-            if not rejected:
-                print(f"  All proposals accepted (revision round {revision_round+1})")
-                break
+            # Agent 1 ↔ Agent 2: Propose-Critique-Revise loop
+            max_revision_rounds = 3
+            all_accepted = []
 
-            if revision_round < max_revision_rounds - 1:
-                # Agent 1: Revise rejected proposals
-                tracer.log_section(f"ROUND {round_num} — AGENT 1: REVISE (pass {revision_round+1})")
+            for revision_round in range(max_revision_rounds):
+                # Agent 2: Critique
+                tracer.log_section(f"ROUND {round_num} — AGENT 2: CRITIC (pass {revision_round+1}/{max_revision_rounds})")
                 tracer.log_subsection("Inputs")
-                tracer.log_rejected(rejected, label="Critiques to address")
+                tracer.log_kv("Reviewing", f"{len(proposals)} proposals")
+                tracer.log_kv("Strategy", strategy["strategy"])
 
-                proposals = proposal_agent.revise(
+                accepted, rejected = critic_agent.critique(
                     context=context,
                     search_state=search_state,
-                    rejected_with_critiques=rejected,
+                    proposals=proposals,
                     max_params=args.max_params,
                     client=client,
+                    vocab_size=vocab_size,
+                    max_adm=max_adm,
                     model=args.model,
                     strategy=strategy,
                     max_flops=args.max_flops,
+                    num_classes=task_info(args.task)["num_classes"],
+                    flops_seq_len=args.flops_seq_len,
+                    already_accepted=all_accepted,
                 )
 
-                tracer.log_subsection("Output: Revised Proposals")
-                tracer.log_archs("Revised", proposals)
+                tracer.log_subsection("Output")
+                tracer.log_archs("Accepted", accepted)
+                tracer.log_rejected(rejected)
 
-                if not proposals:
-                    print(f"  Revision produced no valid proposals, stopping revision loop")
+                all_accepted.extend(accepted)
+
+                if not rejected:
+                    print(f"  All proposals accepted (revision round {revision_round+1})")
                     break
-            else:
-                print(f"  Max revision rounds ({max_revision_rounds}) reached, "
-                      f"dropping {len(rejected)} still-rejected proposals")
 
-        reviewed = all_accepted
+                if revision_round < max_revision_rounds - 1:
+                    # Agent 1: Revise rejected proposals
+                    tracer.log_section(f"ROUND {round_num} — AGENT 1: REVISE (pass {revision_round+1})")
+                    tracer.log_subsection("Inputs")
+                    tracer.log_rejected(rejected, label="Critiques to address")
 
-        if not reviewed:
-            consecutive_failures += 1
-            print(f"No proposals accepted after revision. "
-                  f"({consecutive_failures}/{max_consecutive_failures} consecutive failures)")
-            if consecutive_failures >= max_consecutive_failures:
-                print("Too many consecutive failures, stopping search.")
-                break
-            continue
+                    proposals = proposal_agent.revise(
+                        context=context,
+                        search_state=search_state,
+                        rejected_with_critiques=rejected,
+                        max_params=args.max_params,
+                        client=client,
+                        model=args.model,
+                        strategy=strategy,
+                        max_flops=args.max_flops,
+                    )
 
-        consecutive_failures = 0  # Reset on success
+                    tracer.log_subsection("Output: Revised Proposals")
+                    tracer.log_archs("Revised", proposals)
 
-        # Agent 3: Run experiments (val only)
-        tracer.log_section(f"ROUND {round_num} — AGENT 3a: EXPERIMENT")
-        tracer.log_subsection("Inputs")
-        tracer.log_kv("Architectures", f"{len(reviewed)} accepted proposals")
-        tracer.log_kv("Budget remaining", search_state["budget_remaining"])
+                    if not proposals:
+                        print(f"  Revision produced no valid proposals, stopping revision loop")
+                        break
+                else:
+                    print(f"  Max revision rounds ({max_revision_rounds}) reached, "
+                          f"dropping {len(rejected)} still-rejected proposals")
 
-        n_before = len(search_state["completed_experiments"])
-        search_state = experiment_agent.run_trials(
-            reviewed_proposals=reviewed,
-            search_state=search_state,
-            ckpt=ckpt,
-            train_loader=train_loader,
-            val_loader=val_loader,
-            device=device,
-            args=args,
-            vocab_size=vocab_size,
-            max_adm=max_adm,
-        )
+            # Deduplicate within this round: revised proposals may converge to
+            # the same config already accepted in an earlier pass.  Keep first
+            # occurrence (it has the richer rationale from the initial pass).
+            _seen_this_round: set[tuple[int, int, int, int]] = set()
+            reviewed = []
+            for arch in all_accepted:
+                key = (arch["embed_dim"], arch["depth"],
+                       arch["mlp_ratio"], arch["num_heads"])
+                if key not in _seen_this_round:
+                    _seen_this_round.add(key)
+                    reviewed.append(arch)
+            n_deduped = len(all_accepted) - len(reviewed)
+            if n_deduped:
+                print(f"  Deduplicated {n_deduped} within-round duplicate(s) "
+                      f"({len(all_accepted)} → {len(reviewed)} architectures)")
 
-        new_results = search_state["completed_experiments"][n_before:]
-        tracer.log_subsection("Results")
-        tracer.log_arch_table(new_results, label="New experiment results")
-        tracer.log_kv("Budget remaining", search_state["budget_remaining"])
-        best = search_state.get("best_proposal")
-        if best:
-            tracer.log_kv("Current best", f"{Tracer._fmt_arch(best)} (avg_rank={best.get('avg_rank', '?')})")
+            if not reviewed:
+                consecutive_failures += 1
+                print(f"No proposals accepted after revision. "
+                      f"({consecutive_failures}/{max_consecutive_failures} consecutive failures)")
+                if consecutive_failures >= max_consecutive_failures:
+                    print("Too many consecutive failures, stopping search.")
+                    break
+                continue
 
-        # Agent 3: Decide strategy for next round
-        if search_state["budget_remaining"] > 0:
-            tracer.log_section(f"ROUND {round_num} — AGENT 3b: STRATEGY")
+            consecutive_failures = 0  # Reset on success
+
+            # Agent 3: Run experiments (val only)
+            tracer.log_section(f"ROUND {round_num} — AGENT 3a: EXPERIMENT")
             tracer.log_subsection("Inputs")
-            tracer.log_kv("Completed exps", len(search_state["completed_experiments"]))
+            tracer.log_kv("Architectures", f"{len(reviewed)} accepted proposals")
             tracer.log_kv("Budget remaining", search_state["budget_remaining"])
 
-            strategy = experiment_agent.decide_strategy(
-                context=context,
+            n_before = len(search_state["completed_experiments"])
+            search_state = experiment_agent.run_trials(
+                reviewed_proposals=reviewed,
                 search_state=search_state,
-                client=client,
-                model=args.model,
+                ckpt=ckpt,
+                train_loader=train_loader,
+                val_loader=val_loader,
+                device=device,
+                args=args,
+                vocab_size=vocab_size,
+                max_adm=max_adm,
             )
 
-            tracer.log_subsection("Decision")
-            tracer.log_kv("Strategy", f"{strategy['strategy']}")
-            tracer.log_kv("Rationale", f"\"{strategy.get('rationale', '')}\"")
+            new_results = search_state["completed_experiments"][n_before:]
+            tracer.log_subsection("Results")
+            tracer.log_arch_table(new_results, label="New experiment results")
+            tracer.log_kv("Budget remaining", search_state["budget_remaining"])
+            best = search_state.get("best_proposal")
+            if best:
+                tracer.log_kv("Current best", f"{Tracer._fmt_arch(best)} (avg_rank={best.get('avg_rank', '?')})")
 
+            # Agent 3: Decide strategy for next round
+            if search_state["budget_remaining"] > 0:
+                tracer.log_section(f"ROUND {round_num} — AGENT 3b: STRATEGY")
+                tracer.log_subsection("Inputs")
+                tracer.log_kv("Completed exps", len(search_state["completed_experiments"]))
+                tracer.log_kv("Budget remaining", search_state["budget_remaining"])
+
+                strategy = experiment_agent.decide_strategy(
+                    context=context,
+                    search_state=search_state,
+                    client=client,
+                    model=args.model,
+                )
+
+                tracer.log_subsection("Decision")
+                tracer.log_kv("Strategy", f"{strategy['strategy']}")
+                tracer.log_kv("Rationale", f"\"{strategy.get('rationale', '')}\"")
+
+        except Exception as e:
+            # Catch LLM API errors (and any other unexpected exceptions) so
+            # already-computed results are not lost.  Treat as a consecutive
+            # failure — three in a row terminates the search gracefully.
+            consecutive_failures += 1
+            print(f"\n⚠️  Round {round_num} crashed: {type(e).__name__}: {e}")
+            print(f"  ({consecutive_failures}/{max_consecutive_failures} consecutive failures)")
+            if consecutive_failures >= max_consecutive_failures:
+                print("Too many consecutive failures, stopping search and saving partial results.")
+                break
+            # Fall back to exploration strategy for the next attempt in case
+            # the current strategy prompt is causing the LLM error.
+            strategy = {"strategy": "exploration",
+                        "rationale": f"fallback after round {round_num} error"}
 
     # =============================================
     # Save search results (val only)

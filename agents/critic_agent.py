@@ -218,13 +218,18 @@ def _validate_config(config):
 
 def critique(context, search_state, proposals, max_params, client,
              vocab_size=None, max_adm=8, model="google/gemini-2.5-flash-lite", strategy=None,
-             max_flops=None, flops_seq_len=512, num_classes=2):
+             max_flops=None, flops_seq_len=512, num_classes=2,
+             already_accepted=None):
     """
     Use Claude to critique architecture proposals.
 
     Args:
         num_classes: head output dimensionality used for parameter counting
                      (2 for binary tasks, 18 for multilabel phenotypes).
+        already_accepted: list of config dicts already accepted in the
+                          current round (earlier passes).  Used to reject
+                          revised proposals that converge to an already-
+                          accepted architecture within the same round.
 
     Returns:
         (accepted, rejected_with_critiques)
@@ -242,11 +247,17 @@ def critique(context, search_state, proposals, max_params, client,
     # LLM under load) can miss matches. Build a tuple-set of completed configs
     # once up-front; every accept path below will check membership before
     # admitting a proposal. Tuple order matches the 4-dim search-space schema.
+    # Also includes architectures already accepted in the current round's
+    # earlier passes to prevent within-round duplication.
     completed_tuples: set[tuple[int, int, int, int]] = {
         (c["embed_dim"], c["depth"], c["mlp_ratio"], c["num_heads"])
         for c in search_state.get("completed_experiments", [])
         if all(k in c for k in ("embed_dim", "depth", "mlp_ratio", "num_heads"))
     }
+    for c in (already_accepted or []):
+        if all(k in c for k in ("embed_dim", "depth", "mlp_ratio", "num_heads")):
+            completed_tuples.add(
+                (c["embed_dim"], c["depth"], c["mlp_ratio"], c["num_heads"]))
 
     def _is_completed_dupe(cfg: dict) -> bool:
         return (cfg["embed_dim"], cfg["depth"],

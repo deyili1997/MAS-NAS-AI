@@ -33,8 +33,13 @@ def train_one_epoch(model: torch.nn.Module, criterion,
                     task_type='binary'):
 
     model.train()
-    random.seed(epoch) 
-    
+    # Only re-seed in supernet mode (different subnet sampled each epoch).
+    # In retrain/finetune mode this would corrupt the global random state,
+    # breaking seed determinism for baselines that use random.choice() for
+    # architecture sampling (baseline0, baseline1, baseline3).
+    if mode == 'super':
+        random.seed(epoch)
+
     if mode == 'retrain':
         config = retrain_config
         model.set_sample_config(config=config)
