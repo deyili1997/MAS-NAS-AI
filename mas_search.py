@@ -223,6 +223,18 @@ def _find_most_similar_hospital(target_summary, historical_df):
     target_vec = np.array([[target_summary.get(c, 0) for c in SUMMARY_FEATURE_COLS]])
     candidate_vecs = candidates[SUMMARY_FEATURE_COLS].fillna(0).values
 
+    # Z-score normalize so high-magnitude features (e.g. num_samples ~50k)
+    # don't dominate cosine over informative low-magnitude features
+    # (e.g. avg_diag_per_patient ~10). Without this, Pretrain_num_samples
+    # alone contributes ~99% of the dot product.
+    # Fit on candidates only (analogous to train-set scaler) so the target
+    # doesn't shift the statistics; apply to both.
+    mu = candidate_vecs.mean(axis=0)
+    sigma = candidate_vecs.std(axis=0)
+    sigma[sigma == 0] = 1.0  # constant features → no scaling
+    target_vec = (target_vec - mu) / sigma
+    candidate_vecs = (candidate_vecs - mu) / sigma
+
     sims = cosine_similarity(target_vec, candidate_vecs)[0]
     best_idx = np.argmax(sims)
     best_hospital = candidates.iloc[best_idx]["hospital"]
