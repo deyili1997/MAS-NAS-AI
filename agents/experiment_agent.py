@@ -363,11 +363,14 @@ def decide_strategy(context, search_state, client, model="google/gemini-2.5-flas
     try:
         result = json.loads(text)
     except json.JSONDecodeError:
-        # Extract JSON object from response
+        decoder = json.JSONDecoder()
         start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            result = json.loads(text[start:end + 1])
+        if start != -1:
+            try:
+                result, _ = decoder.raw_decode(text, start)
+            except json.JSONDecodeError:
+                print(f"  Failed to parse strategy response, defaulting to exploration")
+                return {"strategy": "exploration", "rationale": "parse failure fallback"}
         else:
             print(f"  Failed to parse strategy response, defaulting to exploration")
             return {"strategy": "exploration", "rationale": "parse failure fallback"}

@@ -192,10 +192,10 @@ def _parse_critiques(response_text):
     try:
         return json.loads(text)
     except json.JSONDecodeError:
+        decoder = json.JSONDecoder()
         start = text.find("[")
-        end = text.rfind("]")
-        if start != -1 and end != -1 and end > start:
-            return json.loads(text[start:end + 1])
+        if start != -1:
+            return decoder.raw_decode(text, start)[0]
         raise
 
 

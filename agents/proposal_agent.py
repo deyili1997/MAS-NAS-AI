@@ -225,11 +225,10 @@ def _parse_proposals(response_text):
     try:
         proposals = json.loads(text)
     except json.JSONDecodeError:
-        # LLM may have added preamble text — extract the JSON array
+        decoder = json.JSONDecoder()
         start = text.find("[")
-        end = text.rfind("]")
-        if start != -1 and end != -1 and end > start:
-            proposals = json.loads(text[start:end + 1])
+        if start != -1:
+            proposals, _ = decoder.raw_decode(text, start)
         else:
             raise
 
