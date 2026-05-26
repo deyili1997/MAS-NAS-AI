@@ -264,7 +264,7 @@ for mode_spec in "${MODES[@]}"; do
         counter=$((counter + 1))
         step "B.${counter}/${total_runs}  mas_search ${mode} on ${task} (model=${LLM_MODEL})"
         $PY mas_search.py \
-            --hospital ${TARGET_HOSPITAL} --task ${task} --max_params 2000000 \
+            --hospital ${TARGET_HOSPITAL} --task ${task} --max_params 4000000 \
             --budget ${SMOKE_BUDGET} --seed ${SMOKE_SEED} --num_workers ${NUM_WORKERS} \
             --batch_size ${SMOKE_BATCH_SIZE} \
             --finetune_epochs ${SMOKE_FINETUNE_EPOCHS} \
@@ -310,7 +310,7 @@ for i in 0 1 2 3 4; do
         fi
         step "C.${counter}/${total_runs}  baseline${i} (${bname}) on ${task} ${MODEL_ARG}"
         $PY baselines/baseline${i}.py \
-            --hospital ${TARGET_HOSPITAL} --task ${task} --max_params 2000000 \
+            --hospital ${TARGET_HOSPITAL} --task ${task} --max_params 4000000 \
             --budget ${SMOKE_BUDGET} --seed ${SMOKE_SEED} --num_workers ${NUM_WORKERS} \
             --ckpt_path "${CKPT_PATH}" \
             --batch_size ${SMOKE_BATCH_SIZE} \

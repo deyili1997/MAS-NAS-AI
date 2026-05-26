@@ -12,11 +12,11 @@ directly in the orchestration layer before the search loop begins.
 Usage:
     # With pretrain integrated (no --ckpt_path):
     python mas_search.py \
-        --hospital MIMIC-IV --task death --max_params 2000000 --budget 10
+        --hospital MIMIC-IV --task death --max_params 4000000 --budget 10
 
     # With existing checkpoint:
     python mas_search.py \
-        --hospital MIMIC-IV --task death --max_params 2000000 --budget 10 \
+        --hospital MIMIC-IV --task death --max_params 4000000 --budget 10 \
         --ckpt_path /blue/mei.liu/lideyi/MAS-NAS/results/MIMIC-IV/checkpoint_mlm/mlm_model.pt
 """
 
@@ -814,6 +814,9 @@ def main():
                 model=args.model,
                 strategy=strategy,
                 max_flops=args.max_flops,
+                vocab_size=vocab_size,
+                num_classes=task_info(args.task)["num_classes"],
+                max_adm=max_adm,
             )
 
             tracer.log_subsection(f"Output: {len(proposals)} Proposals")
@@ -866,20 +869,32 @@ def main():
                     break
 
                 if revision_round < max_revision_rounds - 1:
+                    # Filter out duplicate-tagged rejections — the LLM can't
+                    # meaningfully revise an exact duplicate; it tends to propose
+                    # the same config again, wasting revision rounds and LLM calls.
+                    revisable = [r for r in rejected
+                                 if "duplicate" not in r.get("risk_tags", [])]
+                    if not revisable:
+                        print(f"  All rejections are duplicates — skipping revision")
+                        break
+
                     # Agent 1: Revise rejected proposals
                     tracer.log_section(f"ROUND {round_num} — AGENT 1: REVISE (pass {revision_round+1})")
                     tracer.log_subsection("Inputs")
-                    tracer.log_rejected(rejected, label="Critiques to address")
+                    tracer.log_rejected(revisable, label="Critiques to address")
 
                     proposals = proposal_agent.revise(
                         context=context,
                         search_state=search_state,
-                        rejected_with_critiques=rejected,
+                        rejected_with_critiques=revisable,
                         max_params=args.max_params,
                         client=client,
                         model=args.model,
                         strategy=strategy,
                         max_flops=args.max_flops,
+                        vocab_size=vocab_size,
+                        num_classes=task_info(args.task)["num_classes"],
+                        max_adm=max_adm,
                     )
 
                     tracer.log_subsection("Output: Revised Proposals")

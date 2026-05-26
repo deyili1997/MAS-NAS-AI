@@ -18,6 +18,55 @@ from utils.tracer import get_tracer
 from utils.llm_counter import increment as _llm_increment
 
 
+def _estimate_subnet_params(embed_dim, depth, mlp_ratio, vocab_size,
+                            num_classes=2, type_vocab_size=7, max_adm=8):
+    """Pure-arithmetic param estimate (mirrors run_pipeline.count_subnet_params).
+
+    Duplicated here to avoid importing run_pipeline (which pulls in torch/pandas).
+    """
+    d = embed_dim
+    params = vocab_size * d + type_vocab_size * d + (max_adm + 2) * d
+    for _ in range(depth):
+        ffn_dim = d * mlp_ratio
+        params += 3 * d * d + 3 * d        # QKV
+        params += d * d + d                 # out_proj
+        params += d * ffn_dim + ffn_dim     # fc1
+        params += ffn_dim * d + d           # fc2
+        params += 4 * d                     # LayerNorm × 2
+    params += 2 * d                         # final LayerNorm
+    params += d * d + d                     # MLM dense
+    params += 2 * d                         # MLM LN
+    params += d * vocab_size + vocab_size   # MLM head
+    params += d * num_classes + num_classes  # CLS head
+    return params
+
+
+def _build_feasibility_section(vocab_size, max_params, num_classes=2, max_adm=8):
+    """Build a prompt section listing (embed_dim, depth) combos that always exceed budget.
+
+    Uses mlp_ratio=1 (minimum) for the lower bound — if even that exceeds
+    max_params, NO mlp_ratio will make the combo feasible.
+    """
+    infeasible = []
+    for d in CHOICES["embed_dim"]:
+        for depth in CHOICES["depth"]:
+            min_params = _estimate_subnet_params(
+                d, depth, mlp_ratio=1, vocab_size=vocab_size,
+                num_classes=num_classes, max_adm=max_adm)
+            if min_params > max_params:
+                infeasible.append((d, depth, min_params))
+    if not infeasible:
+        return ""
+    lines = [
+        f"\n## INFEASIBLE Combinations (auto-rejected — do NOT propose)\n"
+        f"These (embed_dim, depth) combos ALWAYS exceed {max_params:,} params "
+        f"even at the smallest mlp_ratio=1. They will be instantly rejected.\n"
+    ]
+    for d, depth, min_p in infeasible:
+        lines.append(f"  - embed_dim={d}, depth={depth}: min {min_p:,} params\n")
+    return "".join(lines)
+
+
 def _np_default(obj):
     """numpy-aware default= for json.dumps. See agents/experiment_agent.py."""
     if isinstance(obj, np.integer):
@@ -29,7 +78,8 @@ def _np_default(obj):
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
-def _build_prompt(context, search_state, max_params, strategy=None, max_flops=None):
+def _build_prompt(context, search_state, max_params, strategy=None, max_flops=None,
+                  vocab_size=None, num_classes=2, max_adm=8):
     """Build the proposal prompt for Claude."""
     parts = []
 
@@ -58,6 +108,12 @@ def _build_prompt(context, search_state, max_params, strategy=None, max_flops=No
     parts.append(f"Maximum allowed parameters: {max_params:,}\n")
     if max_flops is not None:
         parts.append(f"Maximum allowed FLOPs: {max_flops:,}\n")
+
+    # Infeasible (embed_dim, depth) combos — prevents LLM from proposing configs
+    # that always exceed the param budget regardless of mlp_ratio/num_heads.
+    if vocab_size is not None:
+        parts.append(_build_feasibility_section(
+            vocab_size, max_params, num_classes=num_classes, max_adm=max_adm))
 
     # Target dataset info
     target = context.get("target_summary", {})
@@ -314,7 +370,8 @@ def _call_llm(prompt, client, model, max_retries=5, max_parse_retries=1):
 
 
 def propose(context, search_state, max_params, client, model="google/gemini-2.5-flash-lite",
-            strategy=None, max_flops=None):
+            strategy=None, max_flops=None,
+            vocab_size=None, num_classes=2, max_adm=8):
     """
     Use Claude to propose new architectures.
 
@@ -324,12 +381,14 @@ def propose(context, search_state, max_params, client, model="google/gemini-2.5-
     strat_name = strategy.get("strategy", "exploration") if strategy else "exploration"
     print(f"\n[Agent 1: Architecture Proposal] (strategy={strat_name})")
     prompt = _build_prompt(context, search_state, max_params, strategy=strategy,
-                           max_flops=max_flops)
+                           max_flops=max_flops,
+                           vocab_size=vocab_size, num_classes=num_classes, max_adm=max_adm)
     return _call_llm(prompt, client, model)
 
 
 def _build_revision_prompt(context, search_state, rejected_with_critiques, max_params,
-                           strategy=None, max_flops=None):
+                           strategy=None, max_flops=None,
+                           vocab_size=None, num_classes=2, max_adm=8):
     """Build a revision prompt based on critic feedback."""
     parts = []
 
@@ -350,6 +409,11 @@ def _build_revision_prompt(context, search_state, rejected_with_critiques, max_p
     )
     if max_flops is not None:
         parts.append(f"Maximum allowed FLOPs: {max_flops:,}\n")
+
+    # Infeasible combos — prevents repeated proposals of budget-busting configs
+    if vocab_size is not None:
+        parts.append(_build_feasibility_section(
+            vocab_size, max_params, num_classes=num_classes, max_adm=max_adm))
 
     # Layer 2: Architecture Prior (compact, this is revise prompt — keep brief)
     arch_prior = context.get("meta_regression_prior") or {}
@@ -420,7 +484,8 @@ def _build_revision_prompt(context, search_state, rejected_with_critiques, max_p
 
 
 def revise(context, search_state, rejected_with_critiques, max_params, client,
-           model="google/gemini-2.5-flash-lite", strategy=None, max_flops=None):
+           model="google/gemini-2.5-flash-lite", strategy=None, max_flops=None,
+           vocab_size=None, num_classes=2, max_adm=8):
     """
     Use Claude to revise rejected proposals based on critic feedback.
 
@@ -434,5 +499,7 @@ def revise(context, search_state, rejected_with_critiques, max_params, client,
     print(f"  Revising {len(rejected_with_critiques)} rejected proposals...")
 
     prompt = _build_revision_prompt(context, search_state, rejected_with_critiques, max_params,
-                                    strategy=strategy, max_flops=max_flops)
+                                    strategy=strategy, max_flops=max_flops,
+                                    vocab_size=vocab_size, num_classes=num_classes,
+                                    max_adm=max_adm)
     return _call_llm(prompt, client, model)

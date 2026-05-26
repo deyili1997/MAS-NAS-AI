@@ -121,7 +121,7 @@ def count_subnet_params(config, vocab_size, num_classes=2, type_vocab_size=7, ma
     return params
 
 
-def count_subnet_flops(config, flops_seq_len, super_embed_dim=128, num_classes=2):
+def count_subnet_flops(config, flops_seq_len, super_embed_dim=256, num_classes=2):
     """
     Analytically estimate FLOPs for a forward pass through a subnet.
 

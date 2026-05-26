@@ -23,7 +23,7 @@ the architectures it has itself evaluated in this run.
 Usage:
     python baselines/baseline2.py \
         --hospital MIMIC-IV --task death \
-        --max_params 2000000 --budget 10 \
+        --max_params 4000000 --budget 10 \
         --ckpt_path /blue/mei.liu/lideyi/MAS-NAS/results/MIMIC-IV/checkpoint_mlm/mlm_model.pt
 """
 

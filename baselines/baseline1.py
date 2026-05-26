@@ -16,12 +16,12 @@ Usage:
     # Reuse an existing MAS-produced checkpoint
     python baselines/baseline1.py \
         --hospital MIMIC-IV --task death \
-        --max_params 2000000 --budget 10 \
+        --max_params 4000000 --budget 10 \
         --ckpt_path /blue/mei.liu/lideyi/MAS-NAS/results/MIMIC-IV/checkpoint_mlm/mlm_model.pt
 
     # Or pretrain automatically
     python baselines/baseline1.py \
-        --hospital MIMIC-IV --task death --max_params 2000000 --budget 10
+        --hospital MIMIC-IV --task death --max_params 4000000 --budget 10
 """
 
 import argparse

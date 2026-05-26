@@ -350,13 +350,24 @@ def critique(context, search_state, proposals, max_params, client,
         }
 
         if decision == "reject":
-            print(f"  Proposal {idx} [REJECTED]: {critique_text[:80]}  tags={risk_tags}")
-            rejected_with_critiques.append({
-                "proposal": config,
-                "critique": critique_text,
-                "risk_tags": risk_tags,
-            })
-            continue
+            # Override false "too_similar" rejections: the LLM sometimes treats
+            # proposals that differ in 1+ dimension as "too similar" even though
+            # HARD duplicate is only for exact 4-tuple matches.  The programmatic
+            # dedup safety net is the authoritative duplicate checker — if the
+            # config is NOT an exact duplicate, override to accept.
+            if "too_similar" in risk_tags and not _is_completed_dupe(config):
+                print(f"  Proposal {idx} [OVERRIDE → ACCEPTED]: LLM said 'too_similar' "
+                      f"but config is NOT an exact duplicate — overriding to accept")
+                decision = "accept"
+                # fall through to accept validation below
+            else:
+                print(f"  Proposal {idx} [REJECTED]: {critique_text[:80]}  tags={risk_tags}")
+                rejected_with_critiques.append({
+                    "proposal": config,
+                    "critique": critique_text,
+                    "risk_tags": risk_tags,
+                })
+                continue
 
         # Accept — do final validation
         if not _validate_config(config):

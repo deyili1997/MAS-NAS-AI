@@ -41,7 +41,7 @@ The LLM only sees its own search trajectory in this run.
 Usage:
     python baselines/baseline3.py \\
         --hospital MIMIC-IV --task death \\
-        --max_params 2000000 --budget 20 --n_niches 16 \\
+        --max_params 4000000 --budget 20 --n_niches 16 \\
         --ckpt_path /blue/mei.liu/lideyi/MAS-NAS/results/MIMIC-IV/checkpoint_mlm/mlm_model.pt
 """
 

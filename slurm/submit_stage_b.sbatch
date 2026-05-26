@@ -91,7 +91,7 @@ HISTORY_ROOT=/blue/mei.liu/lideyi/MAS-NAS/results
 COMMON_ARGS=(
     --hospital $HOSPITAL
     --task $TASK
-    --max_params 2000000
+    --max_params 4000000
     --flops_seq_len 512
     --ckpt_path $CKPT
     --results_dir $RESULTS_DIR

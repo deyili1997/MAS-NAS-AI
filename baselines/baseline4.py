@@ -29,7 +29,7 @@ Same supernet ckpt + `_finetune_one_arch` + `--budget` semantics as baselines
 Usage:
     python baselines/baseline4.py \\
         --hospital MIMIC-IV --task death \\
-        --max_params 2000000 --budget 20 \\
+        --max_params 4000000 --budget 20 \\
         --candidates_per_iter 3 \\
         --ckpt_path /blue/mei.liu/lideyi/MAS-NAS/results/MIMIC-IV/checkpoint_mlm/mlm_model.pt
 """
