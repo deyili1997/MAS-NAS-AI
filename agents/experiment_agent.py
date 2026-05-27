@@ -241,19 +241,13 @@ def _update_best_by_composite_rank(search_state):
     model_sds = search_state.get("_model_sds", [])
     configs = search_state.get("_configs", [])
 
-    if best_idx < len(model_sds):
+    if best_idx < len(model_sds) and model_sds[best_idx] is not None:
         search_state["best_model_sd"] = model_sds[best_idx]
         search_state["best_config"] = configs[best_idx]
         search_state["best_proposal"] = experiments[best_idx]
         print(f"\n  Best architecture (composite rank): idx={best_idx}, "
               f"embed_dim={experiments[best_idx]['embed_dim']}, "
               f"depth={experiments[best_idx]['depth']}")
-        # Free non-best model snapshots to avoid accumulating ~1 GB of CPU
-        # RAM over 50 experiments.  Keep the list length in-sync with
-        # completed_experiments so best_idx stays valid across calls.
-        for j in range(len(model_sds)):
-            if j != best_idx:
-                model_sds[j] = None
 
 
 # ---------------------------------------------------------------------------
