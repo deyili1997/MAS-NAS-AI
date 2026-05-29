@@ -623,7 +623,7 @@ def build_loto_ablation_table(records: dict, output_path: Path) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Significance table — paired Wilcoxon: MAS-NAS vs each baseline
+# Significance table — Bootstrap 95% CI: MAS-NAS vs each baseline
 # ---------------------------------------------------------------------------
 def build_significance_table(
     records: dict,
@@ -775,7 +775,7 @@ def main():
         )
         print(df_cost_n10.to_string(index=False))
 
-        print(f"\n[6/7] {hospital} — Significance table (Wilcoxon + Holm-Bonferroni)")
+        print(f"\n[6/7] {hospital} — Significance table (Bootstrap 95% CI, 1000 resamples)")
         df_sig = build_significance_table(records, out_dir / f"significance{suf}.csv")
         print(f"  Rows: {len(df_sig)}  →  {out_dir / f'significance{suf}.csv'}")
         if len(df_sig) > 0:

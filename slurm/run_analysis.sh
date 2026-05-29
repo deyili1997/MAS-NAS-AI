@@ -28,7 +28,7 @@ for H in $HOSPITALS; do
   echo "[E.1] aggregate_results  hospital=$H"
   python analyze/aggregate_results.py \
     --results_root "$RESULTS" \
-    --hospital     "$H" \
+    --hospitals    "$H" \
     --out_dir      "$OUT" \
     --mas_budget   20 \
     --baseline_budget 30
@@ -40,7 +40,7 @@ for H in $HOSPITALS; do
   echo "[E.2] plot_search_trajectory  hospital=$H"
   python analyze/plot_search_trajectory.py \
     --results_root "$RESULTS" \
-    --hospital     "$H" \
+    --hospitals    "$H" \
     --out_dir      "$OUT"
 done
 
@@ -50,7 +50,7 @@ for H in $HOSPITALS; do
   echo "[E.3] plot_pareto  hospital=$H"
   python analyze/plot_pareto.py \
     --results_root "$RESULTS" \
-    --hospital     "$H" \
+    --hospitals    "$H" \
     --out_dir      "$OUT"
 done
 
@@ -69,7 +69,7 @@ echo ""
 echo "[E.5] plot_source_hospital_choice"
 python analyze/plot_source_hospital_choice.py \
   --results_root    "$RESULTS" \
-  --target_hospitals source_15 MIMIC-IV \
+  --target_hospitals source_10 MIMIC-IV MIMIC-III \
   --out_dir         "$OUT"
 
 # ── E.6  Fig 3: Regression combined (Stage A data) ────────────────────────
