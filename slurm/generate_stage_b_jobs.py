@@ -10,10 +10,10 @@ table separate from the sbatch body we:
       the TSV to find which (seed, hospital, task, method) failed and pass
       those indices to `sbatch --array=<indices> submit_stage_b.sbatch`.
 
-Default factorial design = 3 seeds × 2 hospitals × 5 tasks × 9 methods = 270.
+Default factorial design = 3 seeds × 3 hospitals × 5 tasks × 9 methods = 405.
 
 Output:
-    slurm/stage_b_jobs.tsv  (270 lines, 4 tab-separated columns, no header)
+    slurm/stage_b_jobs.tsv  (405 lines, 4 tab-separated columns, no header)
         col 1: seed         e.g. 123
         col 2: hospital     e.g. MIMIC-IV
         col 3: task         e.g. death
@@ -38,7 +38,7 @@ from pathlib import Path
 # Defaults match the agreed Stage B factorial design (see paper Methods §8).
 # Edit these lists then re-run the script to regenerate the TSV.
 DEFAULT_SEEDS = [123, 456, 789]
-DEFAULT_HOSPITALS = ["source_15", "MIMIC-IV"]
+DEFAULT_HOSPITALS = ["source_15", "MIMIC-IV", "MIMIC-III"]
 DEFAULT_TASKS = [
     "death",
     "stay",

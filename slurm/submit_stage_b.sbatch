@@ -2,10 +2,10 @@
 # =============================================================================
 # Stage B production launcher — SLURM job array, throttled to 10 parallel.
 # =============================================================================
-# Why an array (not 270 separate sbatch calls):
-#   - Native scheduler throttling via `--array=1-270%10` keeps only 10 jobs
+# Why an array (not 405 separate sbatch calls):
+#   - Native scheduler throttling via `--array=1-405%10` keeps only 10 jobs
 #     running at a time, regardless of cluster load. Friendlier to the QOS
-#     limits than dumping 270 jobs into the queue.
+#     limits than dumping 405 jobs into the queue.
 #   - Single submit, single squeue line to monitor: `squeue -u $USER | grep b`.
 #   - Re-submit failed indices trivially: identify failed array indices in the
 #     logs, then `sbatch --array=42,99,153 slurm/submit_stage_b.sbatch`.
@@ -23,11 +23,11 @@
 #   sbatch slurm/submit_stage_b.sbatch
 #     # → submits all 270 with %10 throttle from this file's header.
 #   # OR override the array range:
-#   sbatch --array=1-50%10 slurm/submit_stage_b.sbatch   # just first 50
+#   sbatch --array=1-135%10 slurm/submit_stage_b.sbatch  # just source_15 (first 135)
 #   sbatch --array=42,99,153 slurm/submit_stage_b.sbatch # re-run 3 failed
 # =============================================================================
 #SBATCH --job-name=b
-#SBATCH --array=1-270%10
+#SBATCH --array=1-405%10
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=lideyi@ufl.edu
 #SBATCH --nodes=1

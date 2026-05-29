@@ -9,7 +9,7 @@ REPO=/home/lideyi/MAS-NAS          # git repo (code lives here)
 PROJECT=/blue/mei.liu/lideyi/MAS-NAS  # data lives here
 RESULTS=$PROJECT/results
 OUT=$PROJECT/analyze/$(date +%Y-%m-%d)
-HOSPITALS="source_15 MIMIC-IV"
+HOSPITALS="source_15 MIMIC-IV MIMIC-III"
 
 mkdir -p "$OUT"
 
