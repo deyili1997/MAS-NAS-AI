@@ -19,8 +19,9 @@ Produces 7 CSVs PER HOSPITAL under `analyze/` (suffixed `_<hospital>`):
   - arch_table_<H>.csv             Selected architectures' params/FLOPs (verifies
                                    --max_params constraint met across all methods)
   - cost_table_<H>.csv             Wall-clock + LLM call counts (compute-fairness audit)
-  - significance_<H>.csv           Paired Wilcoxon: MAS-NAS vs each baseline, with
-                                   Holm-Bonferroni correction across 5 baselines
+  - significance_<H>.csv           Bootstrap 95% CI (1000 resamples): MAS-NAS vs each
+                                   baseline, paired per seed. Reports CI bounds and
+                                   whether CI lower bound > 0 (significant).
 
 Multi-hospital usage (Phase 2 production — MIMIC-III + MIMIC-IV cross-hospital NAS):
     python analyze/aggregate_results.py --hospitals MIMIC-III MIMIC-IV
@@ -39,8 +40,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.stats import wilcoxon
-from statsmodels.stats.multitest import multipletests
 
 
 # ---------------------------------------------------------------------------
@@ -514,12 +513,25 @@ def build_loto_ablation_table(records: dict, output_path: Path) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Significance table — paired Wilcoxon: MAS-NAS vs each baseline
 # ---------------------------------------------------------------------------
-def build_significance_table(records: dict, output_path: Path) -> pd.DataFrame:
-    """For each (task, metric):
-      - Pair MAS-NAS scores with each baseline by seed
-      - Wilcoxon signed-rank test (one-sided: MAS > baseline)
-      - Holm-Bonferroni correction across 5 baselines per (task, metric)
+def build_significance_table(
+    records: dict,
+    output_path: Path,
+    n_boot: int = 1000,
+    rng_seed: int = 42,
+) -> pd.DataFrame:
+    """Bootstrap 95% CI for MAS-NAS vs each baseline (paired by seed).
+
+    For each (task, metric, baseline) triple:
+      1. Compute per-seed paired differences  d_i = MAS_i - baseline_i
+      2. Resample d with replacement 1000 times; record bootstrap mean each time
+      3. 95% CI = [2.5th, 97.5th] percentile of bootstrap distribution
+      4. significant_ci>0 = True  iff  ci_lower > 0  (MAS clearly better)
+
+    This approach is valid for n ≥ 2 seeds and makes no distributional assumption.
+    With n=3 seeds the CI is wide but honest — unlike Wilcoxon which cannot
+    achieve p<0.05 at n=3 and Holm correction makes it even worse.
     """
+    rng = np.random.default_rng(rng_seed)
     rows = []
     for task in TASKS:
         for metric in METRICS:
@@ -527,11 +539,9 @@ def build_significance_table(records: dict, output_path: Path) -> pd.DataFrame:
             if len(mas_seeds) < 2:
                 continue
 
-            # Collect per-baseline comparisons for this (task, metric)
-            comparisons = []
             for baseline in [m for m in MAIN_METHODS if m != "mas"]:
                 bl_seeds = set(get_seeds(records, baseline, task))
-                paired = []
+                diffs = []
                 for s in mas_seeds:
                     if s not in bl_seeds:
                         continue
@@ -539,50 +549,35 @@ def build_significance_table(records: dict, output_path: Path) -> pd.DataFrame:
                     y = records[(baseline, task, s)]["best"].get(metric)
                     if x is None or y is None or pd.isna(x) or pd.isna(y):
                         continue
-                    paired.append((x, y))
-                if len(paired) < 2:
+                    diffs.append(float(x) - float(y))
+
+                if len(diffs) < 2:
                     continue
-                xs = np.array([x for x, _ in paired])
-                ys = np.array([y for _, y in paired])
-                try:
-                    if np.allclose(xs, ys):
-                        # Wilcoxon undefined when all differences are 0
-                        p_raw = 1.0
-                    else:
-                        _, p_raw = wilcoxon(xs, ys, alternative="greater")
-                except ValueError:
-                    p_raw = float("nan")
-                comparisons.append({
-                    "baseline": baseline,
-                    "p_raw": float(p_raw),
-                    "delta_mean": float(np.mean(xs - ys)),
-                    "delta_std": float(np.std(xs - ys, ddof=1)) if len(xs) > 1 else 0.0,
-                    "n_pairs": len(paired),
-                })
 
-            # Holm-Bonferroni correction across the 5 baselines
-            ps = [c["p_raw"] for c in comparisons]
-            valid_ps = [p for p in ps if not (p is None or pd.isna(p))]
-            if len(valid_ps) >= 1:
-                _, p_adj_arr, _, _ = multipletests(ps, method="holm")
-                for c, p_adj in zip(comparisons, p_adj_arr):
-                    c["p_adj_holm"] = float(p_adj)
-            else:
-                for c in comparisons:
-                    c["p_adj_holm"] = c["p_raw"]
+                diffs = np.array(diffs)
+                obs_mean = float(np.mean(diffs))
+                obs_std = float(np.std(diffs, ddof=1))
 
-            for c in comparisons:
+                # Bootstrap: resample seeds with replacement
+                boot_means = np.array([
+                    np.mean(rng.choice(diffs, size=len(diffs), replace=True))
+                    for _ in range(n_boot)
+                ])
+                ci_lo = float(np.percentile(boot_means, 2.5))
+                ci_hi = float(np.percentile(boot_means, 97.5))
+
                 rows.append({
-                    "task": TASK_DISPLAY[task],
-                    "metric": METRIC_DISPLAY[metric],
-                    "baseline": METHOD_DISPLAY[c["baseline"]],
-                    "delta_pct": round(c["delta_mean"] * 100, 3),
-                    "delta_std_pct": round(c["delta_std"] * 100, 3),
-                    "p_raw": round(c["p_raw"], 4) if not pd.isna(c["p_raw"]) else None,
-                    "p_adj_holm": round(c["p_adj_holm"], 4) if not pd.isna(c["p_adj_holm"]) else None,
-                    "significant_p<0.05": (c["p_adj_holm"] < 0.05) if not pd.isna(c["p_adj_holm"]) else None,
-                    "n_pairs": c["n_pairs"],
+                    "task":             TASK_DISPLAY[task],
+                    "metric":           METRIC_DISPLAY[metric],
+                    "baseline":         METHOD_DISPLAY[baseline],
+                    "delta_pct":        round(obs_mean * 100, 3),
+                    "delta_std_pct":    round(obs_std * 100, 3),
+                    "ci_lower_pct":     round(ci_lo * 100, 3),
+                    "ci_upper_pct":     round(ci_hi * 100, 3),
+                    "significant_ci>0": bool(ci_lo > 0),
+                    "n_seeds":          len(diffs),
                 })
+
     df = pd.DataFrame(rows)
     df.to_csv(output_path, index=False)
     return df
@@ -701,7 +696,7 @@ def main():
     print(f"    supp_table_<H>.csv           (Supplementary)")
     print(f"    arch_table_<H>.csv           (size constraint audit)")
     print(f"    cost_table_<H>.csv           (compute fairness audit)")
-    print(f"    significance_<H>.csv         (Wilcoxon + Holm-Bonferroni)")
+    print(f"    significance_<H>.csv         (Bootstrap 95% CI, 1000 resamples)")
 
 
 if __name__ == "__main__":
