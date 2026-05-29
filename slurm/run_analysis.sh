@@ -30,8 +30,8 @@ for H in $HOSPITALS; do
     --results_root "$RESULTS" \
     --hospital     "$H" \
     --out_dir      "$OUT" \
-    --mas_budget   30 \
-    --baseline_budget 50
+    --mas_budget   20 \
+    --baseline_budget 30
 done
 
 # ── E.2  Fig 1: Search trajectory ─────────────────────────────────────────

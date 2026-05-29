@@ -124,37 +124,37 @@ MAS_EXTRA=(--history_root $HISTORY_ROOT)
 
 case "$METHOD" in
   baseline0)
-    python baselines/baseline0.py "${COMMON_ARGS[@]}" --budget 50
+    python baselines/baseline0.py "${COMMON_ARGS[@]}" --budget 30
     ;;
   baseline1)
-    python baselines/baseline1.py "${COMMON_ARGS[@]}" --budget 50 \
+    python baselines/baseline1.py "${COMMON_ARGS[@]}" --budget 30 \
         --population_num 8 --select_num 4 --mutation_num 4 --crossover_num 4 --m_prob 0.3
     ;;
   baseline2)
-    python baselines/baseline2.py "${COMMON_ARGS[@]}" --budget 50 \
+    python baselines/baseline2.py "${COMMON_ARGS[@]}" --budget 30 \
         --model google/gemini-2.5-flash-lite
     ;;
   baseline3)
-    python baselines/baseline3.py "${COMMON_ARGS[@]}" --budget 50 \
+    python baselines/baseline3.py "${COMMON_ARGS[@]}" --budget 30 \
         --model google/gemini-2.5-flash-lite --temperature 0.7 \
         --n_niches 16 --random_init_frac 0.3 --mutation_prob 0.85 --temp_jitter 0.1 --top_n_select 3
     ;;
   baseline4)
-    python baselines/baseline4.py "${COMMON_ARGS[@]}" --budget 50 \
+    python baselines/baseline4.py "${COMMON_ARGS[@]}" --budget 30 \
         --model google/gemini-2.5-flash-lite \
         --navigator_temperature 0.7 --generator_temperature 0.7 --candidates_per_iter 3
     ;;
   mas)
-    python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget 50
+    python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget 30
     ;;
   mas_loto)
-    python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget 50 --exclude_exact_task_from_history
+    python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget 30 --exclude_exact_task_from_history
     ;;
   mas_cold)
-    python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget 50 --no_history
+    python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget 30 --no_history
     ;;
   mas_layer1_only)
-    python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget 50 --no_meta_regression
+    python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget 30 --no_meta_regression
     ;;
   *)
     echo "ERROR: Unknown METHOD '$METHOD' (TSV line $SLURM_ARRAY_TASK_ID)"
