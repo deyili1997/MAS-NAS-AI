@@ -38,7 +38,7 @@ from pathlib import Path
 # Defaults match the agreed Stage B factorial design (see paper Methods §8).
 # Edit these lists then re-run the script to regenerate the TSV.
 DEFAULT_SEEDS = [123, 456, 789]
-DEFAULT_HOSPITALS = ["source_15", "MIMIC-IV", "MIMIC-III"]
+DEFAULT_HOSPITALS = ["source_10", "MIMIC-IV", "MIMIC-III"]
 DEFAULT_TASKS = [
     "death",
     "stay",
