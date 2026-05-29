@@ -421,6 +421,7 @@ def parse_args():
 def main():
     args = parse_args()
     t_start = time.perf_counter()
+    eval_times_sec = []
     _llm_reset()
     set_random_seed(args.seed, deterministic=not args.cudnn_benchmark)
     np.random.seed(args.seed)
@@ -567,9 +568,11 @@ def main():
             visited.add(key)
             print(f"  ↳ Evaluating {cand}  params={n_params:,}  flops={n_flops:,}")
 
+            _t_eval = time.perf_counter()
             avg_val, best_sd = _finetune_one_arch(
                 internal, ckpt, train_loader, val_loader, device, args,
             )
+            eval_times_sec.append(time.perf_counter() - _t_eval)
             print(f"    val: Acc={avg_val['accuracy']:.4f}  "
                   f"F1={avg_val['f1']:.4f}  "
                   f"AUROC={avg_val['auroc']:.4f}  "
@@ -771,6 +774,8 @@ def main():
         "candidates_per_iter": int(args.candidates_per_iter),
         "ckpt_used": str(ckpt_path),
         "wall_clock_sec": time.perf_counter() - t_start,
+        "n_evals": len(completed),
+        "per_eval_sec_mean": float(np.mean(eval_times_sec)) if eval_times_sec else None,
         "llm_calls": _llm_get(),
     }
     with open(out_dir / "search_meta.json", "w") as f:

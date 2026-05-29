@@ -8,7 +8,9 @@ AutoFormer-style NAS Pipeline for Longitudinal EHR Data
 """
 
 import argparse
+import json
 import pickle
+import time
 
 import numpy as np
 import pandas as pd
@@ -305,6 +307,7 @@ def pretrain(args, tokenizer, pretrain_data, max_adm, device):
     best_val_loss = float("inf")
     best_model_sd = None
     epochs_without_improve = 0
+    _t_pretrain_start = time.perf_counter()
 
     for epoch in range(args.pretrain_epochs):
         metrics = train_one_epoch(
@@ -356,6 +359,22 @@ def pretrain(args, tokenizer, pretrain_data, max_adm, device):
         "max_adm_num": int(max_adm),
     }, ckpt_path)
     print(f"Saved pretrain checkpoint: {ckpt_path}")
+
+    # Save pretrain timing for cost comparison table
+    pretrain_meta = {
+        "hospital": args.hospital,
+        "wall_clock_sec": time.perf_counter() - _t_pretrain_start,
+        "pretrain_epochs_run": epoch + 1,
+        "embed_dim": int(args.embed_dim),
+        "depth": int(args.depth),
+        "num_heads": int(args.num_heads),
+        "mlp_ratio": float(args.mlp_ratio),
+    }
+    pretrain_meta_path = save_dir / "pretrain_meta.json"
+    with open(pretrain_meta_path, "w") as _f:
+        json.dump(pretrain_meta, _f, indent=2)
+    print(f"Saved pretrain timing: {pretrain_meta_path}  "
+          f"({pretrain_meta['wall_clock_sec']/3600:.2f} GPU-hours)")
     return ckpt_path
 
 

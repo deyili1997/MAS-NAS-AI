@@ -1123,6 +1123,8 @@ def main():
         "ckpt_used": str(ckpt_path),
         "wall_clock_sec": time.perf_counter() - t_start,
         "llm_calls": _llm_get(),  # sum across proposal + experiment + critic agents
+        "n_evals": len(search_state["completed_experiments"]),
+        "per_eval_sec_mean": float(np.mean(search_state["eval_times_sec"])) if search_state.get("eval_times_sec") else None,
         # ★ NEW (Fig 6): which source hospital did Layer 1 cosine pick?
         "matched_source_hospital": _matched_src,
         "matched_source_similarity": float(_matched_src_sim) if _matched_src_sim is not None else None,

@@ -181,10 +181,12 @@ def run_trials(reviewed_proposals, search_state, ckpt, train_loader, val_loader,
               f"embed_dim={proposal['embed_dim']}, depth={proposal['depth']}, "
               f"params={n_params:,}, FLOPs={n_flops:,}")
 
-        # Run finetune (val only)
+        # Run finetune (val only) — timed for cost table
+        _t_eval = time.perf_counter()
         avg_val, best_model_sd = _finetune_one_arch(
             config, ckpt, train_loader, val_loader, device, args
         )
+        search_state.setdefault("eval_times_sec", []).append(time.perf_counter() - _t_eval)
 
         print(f"    Val: Acc={avg_val['accuracy']:.4f}  F1={avg_val['f1']:.4f}  "
               f"AUROC={avg_val['auroc']:.4f}  AUPRC={avg_val['auprc']:.4f}")
