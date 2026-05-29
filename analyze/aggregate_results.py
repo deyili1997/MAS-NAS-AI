@@ -336,28 +336,63 @@ def build_cost_table_n10(
 
 
 def build_cost_table(records: dict, output_path: Path) -> pd.DataFrame:
-    """Per-method total compute cost averaged across (task × seed) runs."""
+    """Per-method compute cost, decomposed into GPU-eval time vs LLM-latency.
+
+    Decomposition (key for reviewer argument):
+      wall_clock = gpu_eval_time + llm_latency
+        gpu_eval_time  = n_evals × per_eval_sec_mean   (GPU-bound, expensive)
+        llm_latency    = wall_clock - gpu_eval_time     (network round-trips, cheap)
+
+    MAS-NAS's extra wall-clock vs CoLLM-NAS is almost entirely LLM latency
+    (cheap API calls), NOT extra GPU compute. GPU eval cost is the same for all
+    methods because all use the same supernet weight-sharing.
+    """
     rows = []
     for method in MAIN_METHODS:
         wall_clocks: list = []
-        llm_calls: list = []
+        llm_calls_list: list = []
+        n_evals_list: list = []
+        per_eval_secs: list = []
+
         for task in TASKS:
             for seed in get_seeds(records, method, task):
                 meta = records[(method, task, seed)]["meta"]
                 if "wall_clock_sec" in meta:
                     wall_clocks.append(meta["wall_clock_sec"])
                 if "llm_calls" in meta:
-                    llm_calls.append(meta["llm_calls"])
+                    llm_calls_list.append(meta["llm_calls"])
+                if "n_evals" in meta:
+                    n_evals_list.append(meta["n_evals"])
+                if meta.get("per_eval_sec_mean") is not None:
+                    per_eval_secs.append(meta["per_eval_sec_mean"])
+
         if not wall_clocks:
             continue
+
+        wall_min_mean = float(np.mean(wall_clocks)) / 60
+        n_evals_mean  = float(np.mean(n_evals_list)) if n_evals_list else None
+        per_eval_mean = float(np.mean(per_eval_secs)) if per_eval_secs else None
+
+        # GPU compute: architecture evaluations only (n_evals × ε)
+        if n_evals_mean is not None and per_eval_mean is not None:
+            gpu_eval_min  = round(n_evals_mean * per_eval_mean / 60, 1)
+            llm_latency_min = round(max(0.0, wall_min_mean - gpu_eval_min), 1)
+        else:
+            gpu_eval_min    = None
+            llm_latency_min = None
+
         rows.append({
-            "method": METHOD_DISPLAY[method],
-            "wall_clock_min_mean": round(float(np.mean(wall_clocks)) / 60, 1),
-            "wall_clock_min_std": round(float(np.std(wall_clocks, ddof=1)) / 60, 1) if len(wall_clocks) > 1 else 0,
-            "wall_clock_min_total": round(float(np.sum(wall_clocks)) / 60, 1),
-            "llm_calls_mean": round(float(np.mean(llm_calls)), 1) if llm_calls else 0,
-            "llm_calls_total": int(np.sum(llm_calls)) if llm_calls else 0,
-            "n_runs": len(wall_clocks),
+            "method":              METHOD_DISPLAY[method],
+            # ── Total ──────────────────────────────────────────────────────
+            "wall_clock_min_mean": round(wall_min_mean, 1),
+            "wall_clock_min_std":  round(float(np.std(wall_clocks, ddof=1)) / 60, 1) if len(wall_clocks) > 1 else 0,
+            # ── Decomposed ─────────────────────────────────────────────────
+            "gpu_eval_min_mean":   gpu_eval_min,    # n_evals × ε  (GPU-bound)
+            "llm_latency_min_mean": llm_latency_min, # LLM round-trips (cheap)
+            # ── LLM calls ──────────────────────────────────────────────────
+            "llm_calls_mean":      round(float(np.mean(llm_calls_list)), 1) if llm_calls_list else 0,
+            "n_evals_mean":        round(n_evals_mean, 1) if n_evals_mean is not None else None,
+            "n_runs":              len(wall_clocks),
         })
     df = pd.DataFrame(rows)
     df.to_csv(output_path, index=False)
