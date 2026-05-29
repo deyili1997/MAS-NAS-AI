@@ -81,45 +81,67 @@ done
 header "3/9" "Timing fields — run 3 methods with budget=$SMOKE_BUDGET"
 # =============================================================================
 echo "  Hospital: source_10 | Task: $SMOKE_TASK | Seed: $SMOKE_SEED"
-mkdir -p "$SMOKE_RESULTS"
+mkdir -p "$SMOKE_RESULTS/seed_${SMOKE_SEED}"
 
-COMMON="--hospital source_10 --task $SMOKE_TASK --seed $SMOKE_SEED \
-        --results_root $SMOKE_RESULTS --budget $SMOKE_BUDGET"
-HISTORY="--history_root $PROJECT/results"
+CKPT="$PROJECT/results/source_10/checkpoint_mlm/mlm_model.pt"
+RESULTS_DIR="$SMOKE_RESULTS/seed_${SMOKE_SEED}"
+HISTORY_ROOT="$PROJECT/results"
+
+COMMON_ARGS=(
+    --hospital     source_10
+    --task         "$SMOKE_TASK"
+    --seed         "$SMOKE_SEED"
+    --ckpt_path    "$CKPT"
+    --results_dir  "$RESULTS_DIR"
+    --budget       "$SMOKE_BUDGET"
+    --max_params   4000000
+    --flops_seq_len 512
+    --pretrain_epochs 100 --pretrain_patience 5
+    --embed_dim 256 --depth 8 --num_heads 8 --mlp_ratio 8
+    --finetune_epochs 10 --finetune_patience 3 --top_k_epochs 3
+    --batch_size 64 --lr 2e-4 --weight_decay 1e-2 --max_grad_norm 1.0
+    --drop_rate 0.1 --attn_drop_rate 0.1 --drop_path_rate 0.1
+    --num_workers 4
+)
 
 echo "  Running baseline0 (Random)..."
-python baselines/baseline0.py $COMMON > /dev/null 2>&1 \
-  && green "baseline0 completed" || red "baseline0 failed"
+python baselines/baseline0.py "${COMMON_ARGS[@]}" \
+  > "$SMOKE_RESULTS/baseline0.log" 2>&1 \
+  && green "baseline0 completed" \
+  || { red "baseline0 failed"; tail -5 "$SMOKE_RESULTS/baseline0.log"; }
 
 echo "  Running baseline2 (LLM-1shot)..."
-python baselines/baseline2.py $COMMON \
-  --model google/gemini-2.5-flash-lite > /dev/null 2>&1 \
-  && green "baseline2 completed" || red "baseline2 failed"
+python baselines/baseline2.py "${COMMON_ARGS[@]}" \
+  --model google/gemini-2.5-flash-lite \
+  > "$SMOKE_RESULTS/baseline2.log" 2>&1 \
+  && green "baseline2 completed" \
+  || { red "baseline2 failed"; tail -5 "$SMOKE_RESULTS/baseline2.log"; }
 
 echo "  Running mas..."
-python mas_search.py $COMMON $HISTORY > /dev/null 2>&1 \
-  && green "mas completed" || red "mas failed"
+python mas_search.py "${COMMON_ARGS[@]}" \
+  --history_root "$HISTORY_ROOT" \
+  > "$SMOKE_RESULTS/mas.log" 2>&1 \
+  && green "mas completed" \
+  || { red "mas failed"; tail -5 "$SMOKE_RESULTS/mas.log"; }
 
 # Check new fields in search_meta.json
 for METHOD in baseline0 baseline2 mas; do
-    META="$SMOKE_RESULTS/seed_${SMOKE_SEED}/source_10/search/${METHOD}/${SMOKE_TASK}/search_meta.json"
+    META="$RESULTS_DIR/source_10/search/${METHOD}/${SMOKE_TASK}/search_meta.json"
     if [[ ! -f "$META" ]]; then
         red "$METHOD: search_meta.json missing"
         continue
     fi
     python - <<PYEOF
-import json, sys
+import json
 with open("$META") as f: m = json.load(f)
 ok = True
 for field in ["n_evals", "per_eval_sec_mean", "wall_clock_sec"]:
     if m.get(field) is None:
-        print(f"  ✗ $METHOD: '{field}' missing or None")
-        ok = False
+        print(f"  ✗ $METHOD: '{field}' missing or None"); ok = False
 if m.get("budget") != $SMOKE_BUDGET:
-    print(f"  ✗ $METHOD: budget={m.get('budget')}, expected $SMOKE_BUDGET")
-    ok = False
+    print(f"  ✗ $METHOD: budget={m.get('budget')}, expected $SMOKE_BUDGET"); ok = False
 if ok:
-    print(f"  ✓ $METHOD: n_evals={m['n_evals']}, per_eval_sec_mean={m['per_eval_sec_mean']:.1f}s, budget={m['budget']}")
+    print(f"  ✓ $METHOD: n_evals={m['n_evals']}, per_eval_sec={m['per_eval_sec_mean']:.1f}s, budget={m['budget']}")
 PYEOF
 done
 
@@ -157,8 +179,10 @@ python analyze/aggregate_results.py \
     --hospitals    source_10 \
     --out_dir      "$SMOKE_OUT" \
     --mas_budget   4 \
-    --baseline_budget "$SMOKE_BUDGET" > /dev/null 2>&1 \
-  && green "aggregate_results.py completed" || red "aggregate_results.py failed"
+    --baseline_budget "$SMOKE_BUDGET" \
+    > "$SMOKE_RESULTS/aggregate.log" 2>&1 \
+  && green "aggregate_results.py completed" \
+  || { red "aggregate_results.py failed"; tail -10 "$SMOKE_RESULTS/aggregate.log"; }
 
 EXPECTED_CSVS=(
     main_table_source_10
