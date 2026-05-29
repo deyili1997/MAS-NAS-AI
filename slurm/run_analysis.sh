@@ -12,9 +12,6 @@ HOSPITALS="source_15 MIMIC-IV"
 
 mkdir -p "$OUT"
 
-source ~/.bashrc
-conda activate Autoformer
-
 cd "$PROJECT"
 
 echo "============================================"
