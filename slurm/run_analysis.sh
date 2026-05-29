@@ -5,14 +5,15 @@
 
 set -euo pipefail
 
-PROJECT=/blue/mei.liu/lideyi/MAS-NAS
+REPO=/home/lideyi/MAS-NAS          # git repo (code lives here)
+PROJECT=/blue/mei.liu/lideyi/MAS-NAS  # data lives here
 RESULTS=$PROJECT/results
 OUT=$PROJECT/analyze/$(date +%Y-%m-%d)
 HOSPITALS="source_15 MIMIC-IV"
 
 mkdir -p "$OUT"
 
-cd "$PROJECT"
+cd "$REPO"
 
 echo "============================================"
 echo " MAS-NAS Stage E Analysis"
