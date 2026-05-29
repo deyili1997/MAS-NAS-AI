@@ -77,7 +77,8 @@ echo ""
 echo "[E.6] plot_regression_combined"
 python analyze/plot_regression_combined.py \
   --results_dir "$RESULTS" \
-  --output      "$OUT/figure3_regression_combined.png"
+  --output      "$OUT/figure3_regression_combined.png" \
+  --summary_csv "$OUT/figure3_spearman_summary.csv"
 
 echo ""
 echo "============================================"
