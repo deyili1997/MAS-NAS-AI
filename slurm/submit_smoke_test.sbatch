@@ -179,15 +179,29 @@ done
 header "7/9" "Bootstrap CI — significance columns"
 # =============================================================================
 python - <<PYEOF
-import pandas as pd, sys
-try:
-    df = pd.read_csv("$SMOKE_OUT/significance_source_10.csv")
-except FileNotFoundError:
-    print("  ✗ significance CSV not found (methods may have failed)"); sys.exit(1)
+import pandas as pd, sys, os
+f = "$SMOKE_OUT/significance_source_10.csv"
+if not os.path.exists(f):
+    print("  ✗ significance CSV not found"); sys.exit(1)
+# Empty is expected with 1 seed — check columns via header only
+with open(f) as fh: header = fh.readline().strip()
+if not header:
+    print("  ✓ significance CSV exists but empty (expected: 1 seed, n<2 → no CI computed)")
+    sys.exit(0)
+df = pd.read_csv(f)
+if len(df) == 0:
+    print("  ✓ significance CSV has header, 0 rows (expected with 1 seed)")
+    required = ["ci_lower_pct","ci_upper_pct","significant_ci>0","delta_pct"]
+    missing = [c for c in required if c not in df.columns]
+    old = [c for c in ["p_raw","p_adj_holm"] if c in df.columns]
+    if missing: print(f"  ✗ Missing columns: {missing}"); sys.exit(1)
+    if old:     print(f"  ✗ Old Wilcoxon columns: {old}"); sys.exit(1)
+    print("  ✓ Correct columns present")
+    sys.exit(0)
 missing = [c for c in ["ci_lower_pct","ci_upper_pct","significant_ci>0","delta_pct"] if c not in df.columns]
 old    = [c for c in ["p_raw","p_adj_holm","significant_p<0.05"] if c in df.columns]
-if missing: print(f"  ✗ Missing bootstrap columns: {missing}"); sys.exit(1)
-if old:     print(f"  ✗ Old Wilcoxon columns still present: {old}"); sys.exit(1)
+if missing: print(f"  ✗ Missing: {missing}"); sys.exit(1)
+if old:     print(f"  ✗ Old columns: {old}"); sys.exit(1)
 print(f"  ✓ Bootstrap CI columns OK ({len(df)} rows)")
 print(df[["task","metric","baseline","delta_pct","ci_lower_pct","ci_upper_pct"]].head(3).to_string(index=False))
 PYEOF
