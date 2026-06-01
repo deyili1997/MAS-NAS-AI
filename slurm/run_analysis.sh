@@ -9,7 +9,7 @@ REPO=/home/lideyi/MAS-NAS          # git repo (code lives here)
 PROJECT=/blue/mei.liu/lideyi/MAS-NAS  # data lives here
 RESULTS=$PROJECT/results
 OUT=$PROJECT/analyze/$(date +%Y-%m-%d)
-HOSPITALS="source_10 MIMIC-IV MIMIC-III"
+HOSPITALS="source_15 MIMIC-IV MIMIC-III"
 
 mkdir -p "$OUT"
 
@@ -69,7 +69,7 @@ echo ""
 echo "[E.5] plot_source_hospital_choice"
 python analyze/plot_source_hospital_choice.py \
   --results_root    "$RESULTS" \
-  --target_hospitals source_10 MIMIC-IV MIMIC-III \
+  --target_hospitals source_15 MIMIC-IV MIMIC-III \
   --out_dir         "$OUT"
 
 # ── E.6  Fig 3: Regression combined (Stage A data) ────────────────────────

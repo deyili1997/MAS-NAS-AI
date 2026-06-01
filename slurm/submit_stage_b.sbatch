@@ -120,7 +120,7 @@ COMMON_ARGS=(
 # loading paths). Baselines 0-4 don't define this argparse flag and would
 # crash with "unrecognized arguments" if it leaked through COMMON_ARGS. Keep
 # it scoped to the mas variants only.
-MAS_EXTRA=(--history_root $HISTORY_ROOT --exclude_from_layer1 source_10)
+MAS_EXTRA=(--history_root $HISTORY_ROOT --exclude_from_layer1 source_15)
 
 case "$METHOD" in
   baseline0)

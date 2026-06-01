@@ -197,6 +197,57 @@ def _load_historical_summaries(results_dir):
     return pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
 
 
+def _find_most_similar_hospital_task_driven(
+    task: str,
+    target_task_features: "np.ndarray",
+    metadata_df: "pd.DataFrame",
+    target_hospital: str,
+) -> tuple:
+    """Select source hospital based on task-specific label statistics.
+
+    For each source hospital, computes the average label_entropy and
+    positive_ratio for `task` from their metadata.csv rows, then selects
+    the hospital whose task feature vector is most similar to the target's.
+
+    This replaces dataset-level cosine similarity for hospital selection,
+    ensuring that architectures retrieved for e.g. the death task come from
+    a source hospital with a *similar death positive rate*, not just similar
+    overall EHR token densities.
+
+    Falls back to None if target_task_features is unavailable or metadata
+    for the task is missing from all source hospitals.
+    """
+    if metadata_df.empty or target_task_features is None:
+        return None, 0.0
+
+    task_df = metadata_df[
+        (metadata_df["task"] == task) &
+        (metadata_df["hospital"] != target_hospital)
+    ].copy()
+
+    if task_df.empty:
+        return None, 0.0
+
+    # Per-source-hospital task statistics
+    stats = task_df.groupby("hospital").agg(
+        label_entropy=("label_entropy", "mean"),
+        positive_ratio=("positive_ratio", "mean"),
+    ).reset_index()
+
+    if stats.empty:
+        return None, 0.0
+
+    # Build task feature vectors for each source hospital
+    source_vecs = np.array([
+        task_feature_vector(task, row.label_entropy, row.positive_ratio)
+        for _, row in stats.iterrows()
+    ])
+    target_vec = target_task_features.reshape(1, -1)
+    sims = cosine_similarity(target_vec, source_vecs)[0]
+    best_idx = int(np.argmax(sims))
+    return stats.iloc[best_idx]["hospital"], float(sims[best_idx])
+
+
 def _find_most_similar_hospital(target_summary, historical_df):
     """Find the most similar hospital by cosine similarity on summary features.
 
@@ -371,7 +422,8 @@ def gather_historical_context(hospital, task, max_params, history_root, top_k,
                               exclude_exact_task_from_history=False,
                               no_history=False,
                               no_meta_regression=False,
-                              exclude_from_layer1=None):
+                              exclude_from_layer1=None,
+                              use_task_driven=True):
     """
     Gather historical context for the target hospital and task.
 
@@ -463,8 +515,41 @@ def gather_historical_context(hospital, task, max_params, history_root, top_k,
             "meta_regression_prior": {},
         }
 
-    similar_hospital, sim_score = _find_most_similar_hospital(target_summary, historical_df)
-    print(f"  Most similar hospital: {similar_hospital} (cosine sim = {sim_score:.4f})")
+    # Task-driven hospital selection (default) vs dataset-level (LOTO fallback).
+    # LOTO reverts to dataset-level to preserve its original ablation semantics:
+    # testing Plan A robustness when exact task records are absent.
+    effective_task_driven = use_task_driven and not exclude_exact_task_from_history
+
+    if effective_task_driven and target_task_features is not None:
+        # Load metadata now so task-driven selection can use it
+        _meta_pattern_early = os.path.join(history_root, "*", "metadata.csv")
+        _meta_files_early = sorted(glob.glob(_meta_pattern_early))
+        _metadata_early = (
+            pd.concat([pd.read_csv(f) for f in _meta_files_early], ignore_index=True)
+            if _meta_files_early else pd.DataFrame()
+        )
+        if exclude_from_layer1:
+            _excl_e = [h for h in exclude_from_layer1 if h != hospital]
+            if _excl_e and not _metadata_early.empty:
+                _metadata_early = _metadata_early[
+                    ~_metadata_early["hospital"].isin(_excl_e)
+                ].copy()
+        similar_hospital, sim_score = _find_most_similar_hospital_task_driven(
+            task, target_task_features, _metadata_early, hospital
+        )
+        selection_mode = "task-driven"
+        if similar_hospital is None:
+            print(f"  ⚠ Task-driven selection failed, falling back to dataset-level.")
+            similar_hospital, sim_score = _find_most_similar_hospital(
+                target_summary, historical_df
+            )
+            selection_mode = "dataset-level (fallback)"
+    else:
+        similar_hospital, sim_score = _find_most_similar_hospital(
+            target_summary, historical_df
+        )
+        selection_mode = "dataset-level" if not effective_task_driven else "dataset-level (LOTO)"
+    print(f"  Most similar hospital [{selection_mode}]: {similar_hospital} (cosine sim = {sim_score:.4f})")
 
     if similar_hospital is None:
         return {
@@ -572,6 +657,10 @@ def parse_args():
                         "defaults to --results_dir (backward-compatible single-seed mode).")
 
     # Robustness ablation flags (Fig 5)
+    p.add_argument("--no_task_driven", action="store_true",
+                   help="Disable task-driven hospital selection in Layer 1 (revert to "
+                        "dataset-level cosine similarity). Useful for ablation or "
+                        "backward compatibility. By default task-driven is ON.")
     p.add_argument("--exclude_from_layer1", type=str, nargs="+", default=[],
                    metavar="HOSPITAL",
                    help="Hospitals to exclude from Layer 1 candidate pool (dataset similarity "
@@ -775,6 +864,7 @@ def main():
         no_history=args.no_history,
         no_meta_regression=args.no_meta_regression,
         exclude_from_layer1=args.exclude_from_layer1,
+        use_task_driven=not args.no_task_driven,
     )
 
     tracer.log_section("PHASE 0 — HISTORICAL CONTEXT")
