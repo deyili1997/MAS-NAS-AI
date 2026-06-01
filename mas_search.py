@@ -370,7 +370,8 @@ def _load_meta_regression_prior(history_root, task) -> dict:
 def gather_historical_context(hospital, task, max_params, history_root, top_k,
                               exclude_exact_task_from_history=False,
                               no_history=False,
-                              no_meta_regression=False):
+                              no_meta_regression=False,
+                              exclude_from_layer1=None):
     """
     Gather historical context for the target hospital and task.
 
@@ -436,6 +437,15 @@ def gather_historical_context(hospital, task, max_params, history_root, top_k,
 
     historical_df = _load_historical_summaries(history_root)
 
+    # Exclude specified hospitals from Layer 1 candidate pool (e.g. internal test hospital)
+    if exclude_from_layer1:
+        _excl = [h for h in exclude_from_layer1 if h != hospital]  # keep self-exclusion separate
+        if _excl:
+            before = len(historical_df)
+            historical_df = historical_df[~historical_df["hospital"].isin(_excl)].copy()
+            print(f"  [Layer 1] Excluded from candidate pool: {_excl} "
+                  f"({before - len(historical_df)} rows dropped)")
+
     if historical_df.empty:
         # _load_historical_summaries already printed the dataset_summary.csv miss warning.
         # This branch fires only when there are zero source hospitals → effectively cold.
@@ -471,6 +481,11 @@ def gather_historical_context(hospital, task, max_params, history_root, top_k,
     metadata_files = sorted(glob.glob(metadata_pattern))
     if metadata_files:
         metadata_df = pd.concat([pd.read_csv(f) for f in metadata_files], ignore_index=True)
+        # Also exclude internal test hospitals from metadata pool
+        if exclude_from_layer1:
+            _excl = [h for h in exclude_from_layer1 if h != hospital]
+            if _excl:
+                metadata_df = metadata_df[~metadata_df["hospital"].isin(_excl)].copy()
     else:
         metadata_df = pd.DataFrame()
 
@@ -557,6 +572,12 @@ def parse_args():
                         "defaults to --results_dir (backward-compatible single-seed mode).")
 
     # Robustness ablation flags (Fig 5)
+    p.add_argument("--exclude_from_layer1", type=str, nargs="+", default=[],
+                   metavar="HOSPITAL",
+                   help="Hospitals to exclude from Layer 1 candidate pool (dataset similarity "
+                        "search and metadata retrieval). Use to prevent internal test hospitals "
+                        "from entering the prior of other target hospitals. E.g. "
+                        "--exclude_from_layer1 source_10")
     p.add_argument("--exclude_exact_task_from_history", action="store_true",
                    help="LOTO ablation: drop rows where task==target from metadata "
                         "before _get_top_k_archs, forcing the cosine-similarity "
@@ -753,6 +774,7 @@ def main():
         exclude_exact_task_from_history=args.exclude_exact_task_from_history,
         no_history=args.no_history,
         no_meta_regression=args.no_meta_regression,
+        exclude_from_layer1=args.exclude_from_layer1,
     )
 
     tracer.log_section("PHASE 0 — HISTORICAL CONTEXT")
