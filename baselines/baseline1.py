@@ -191,7 +191,7 @@ def _evaluate_candidates(cands, search_state, ckpt, train_loader, val_loader,
         avg_val, best_model_sd = _finetune_one_arch(
             internal, ckpt, train_loader, val_loader, device, args
         )
-        eval_times_sec.append(time.perf_counter() - _t_eval)
+        search_state.setdefault("eval_times_sec", []).append(time.perf_counter() - _t_eval)
         print(f"    Val: Acc={avg_val['accuracy']:.4f}  F1={avg_val['f1']:.4f}  "
               f"AUROC={avg_val['auroc']:.4f}  AUPRC={avg_val['auprc']:.4f}")
 
@@ -310,7 +310,6 @@ def parse_args():
 def main():
     args = parse_args()
     t_start = time.perf_counter()
-    eval_times_sec = []
     set_random_seed(args.seed, deterministic=not args.cudnn_benchmark)
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -557,7 +556,7 @@ def main():
         "wall_clock_sec": time.perf_counter() - t_start,
         "llm_calls": 0,    # evolutionary search — no LLM
         "n_evals": len(search_state["completed_experiments"]),
-        "per_eval_sec_mean": float(np.mean(eval_times_sec)) if eval_times_sec else None,
+        "per_eval_sec_mean": float(np.mean(search_state["eval_times_sec"])) if search_state.get("eval_times_sec") else None,
     }
     with open(output_dir / "search_meta.json", "w") as f:
         json.dump(meta, f, indent=2)
