@@ -27,7 +27,7 @@
 #   sbatch --array=42,99,153 slurm/submit_stage_b.sbatch # re-run 3 failed
 # =============================================================================
 #SBATCH --job-name=b
-#SBATCH --array=1-405%20
+#SBATCH --array=1-270%20
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=lideyi@ufl.edu
 #SBATCH --nodes=1
@@ -120,7 +120,8 @@ COMMON_ARGS=(
 # loading paths). Baselines 0-4 don't define this argparse flag and would
 # crash with "unrecognized arguments" if it leaked through COMMON_ARGS. Keep
 # it scoped to the mas variants only.
-MAS_EXTRA=(--history_root $HISTORY_ROOT --exclude_from_layer1 source_15)
+MAS_EXTRA=(--history_root $HISTORY_ROOT --exclude_from_layer1 source_15 \
+           --model anthropic/claude-3.5-haiku)
 
 case "$METHOD" in
   baseline0)
@@ -132,16 +133,16 @@ case "$METHOD" in
     ;;
   baseline2)
     python baselines/baseline2.py "${COMMON_ARGS[@]}" --budget 30 \
-        --model google/gemini-2.5-flash-lite
+        --model anthropic/claude-3.5-haiku
     ;;
   baseline3)
     python baselines/baseline3.py "${COMMON_ARGS[@]}" --budget 30 \
-        --model google/gemini-2.5-flash-lite --temperature 0.7 \
+        --model anthropic/claude-3.5-haiku --temperature 0.7 \
         --n_niches 16 --random_init_frac 0.3 --mutation_prob 0.85 --temp_jitter 0.1 --top_n_select 3
     ;;
   baseline4)
     python baselines/baseline4.py "${COMMON_ARGS[@]}" --budget 30 \
-        --model google/gemini-2.5-flash-lite \
+        --model anthropic/claude-3.5-haiku \
         --navigator_temperature 0.7 --generator_temperature 0.7 --candidates_per_iter 3
     ;;
   mas)
