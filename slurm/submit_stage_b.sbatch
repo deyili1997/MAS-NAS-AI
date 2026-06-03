@@ -27,7 +27,7 @@
 #   sbatch --array=42,99,153 slurm/submit_stage_b.sbatch # re-run 3 failed
 # =============================================================================
 #SBATCH --job-name=b
-#SBATCH --array=1-270%20
+#SBATCH --array=1-450%20
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=lideyi@ufl.edu
 #SBATCH --nodes=1
