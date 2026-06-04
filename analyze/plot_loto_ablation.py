@@ -13,7 +13,7 @@ Reads:
 
 Outputs:
     figure5_loto_robustness.png — 5 panels (one per task) of grouped bars
-                                  with std error bars; * marks p<0.05
+                                  with std error bars
                                   (paired Wilcoxon: MAS-LOTO vs best-baseline)
 
 Paper claims (each isolated by one delta in the companion table):
@@ -35,7 +35,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.stats import wilcoxon
 
 
 # Colors: MAS variants = same crimson family (intensity ~ amount of prior context),
@@ -132,24 +131,6 @@ def best_baseline_per_task(all_scores: dict, task: str) -> str | None:
     return best_method
 
 
-# ---------------------------------------------------------------------------
-# Significance: paired Wilcoxon (MAS-LOTO vs best-baseline) on shared seeds
-# ---------------------------------------------------------------------------
-def paired_wilcoxon(a_dict: dict, b_dict: dict) -> float | None:
-    """One-sided paired Wilcoxon (a > b) on seeds present in both dicts.
-    Returns p-value, or None if too few pairs / undefined."""
-    common_seeds = sorted(set(a_dict) & set(b_dict))
-    if len(common_seeds) < 2:
-        return None
-    a = np.array([a_dict[s] for s in common_seeds])
-    b = np.array([b_dict[s] for s in common_seeds])
-    if np.allclose(a, b):
-        return 1.0
-    try:
-        _, p = wilcoxon(a, b, alternative="greater")
-        return float(p)
-    except ValueError:
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -193,23 +174,6 @@ def plot_panel(ax, all_scores: dict, task: str):
             ax.text(i, m_pct + s_pct + 0.4, f"n={n_seeds}",
                     ha="center", va="bottom", fontsize=7, color="dimgray")
 
-    # Significance: paired Wilcoxon (MAS-LOTO vs best-baseline, one-sided LOTO>baseline)
-    # In the 4-condition factorial, MAS-LOTO is index 2 and best-baseline is index 4.
-    if bb_method and len(cond_order) == 5:
-        loto_dict = all_scores.get(("mas_loto", task), {})
-        bl_dict = all_scores.get((bb_method, task), {})
-        p = paired_wilcoxon(loto_dict, bl_dict)
-        if p is not None and p < 0.05:
-            i_loto = cond_order.index("mas_loto")
-            i_bl = cond_order.index(bb_method)
-            y_top = max(means_pct[i_loto] + stds_pct[i_loto],
-                        means_pct[i_bl] + stds_pct[i_bl]) + 1.5
-            ax.plot([i_loto, i_loto, i_bl, i_bl],
-                    [y_top, y_top + 0.3, y_top + 0.3, y_top],
-                    color="black", linewidth=0.8)
-            stars = "*" if p >= 0.01 else ("**" if p >= 0.001 else "***")
-            ax.text((i_loto + i_bl) / 2, y_top + 0.4, stars,
-                    ha="center", va="bottom", fontsize=11, fontweight="bold")
 
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=8)
