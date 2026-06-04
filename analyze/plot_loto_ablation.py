@@ -63,7 +63,7 @@ CONDITION_DISPLAY = {
     "mas_cold":        "MAS-NAS\n(cold)",
 }
 
-LLM_BASELINE_METHODS = ["baseline3", "baseline4"]
+LLM_BASELINE_METHODS = ["baseline4"]  # baseline3 (LLMatic) excluded
 
 TASKS = ["death", "stay", "readmission", "next_diag_6m_pheno", "next_diag_12m_pheno"]
 TASK_DISPLAY = {

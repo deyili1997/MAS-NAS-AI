@@ -50,7 +50,7 @@ import pandas as pd
 #   - inflating Table 1 with extra rows
 #   - polluting Wilcoxon (would compare MAS vs ablations as if "baselines")
 #   - skewing arch/cost audits
-MAIN_METHODS = ["baseline0", "baseline1", "baseline2", "baseline3", "baseline4", "mas"]
+MAIN_METHODS = ["baseline0", "baseline1", "baseline2", "baseline4", "mas"]  # baseline3 (LLMatic) excluded
 
 # Fig 5 robustness ablation only — these methods are extra MAS variants, not baselines.
 # Used exclusively by build_loto_ablation_table(). Layer factorial design:
@@ -78,7 +78,7 @@ METHOD_DISPLAY = {
 # Methods that compete with MAS as upper-bound LLM-based baselines.
 # `build_loto_ablation_table` automatically picks the best of these per task
 # to fill the "Best baseline" column in Fig 5's companion table.
-LLM_BASELINE_METHODS = ["baseline3", "baseline4"]
+LLM_BASELINE_METHODS = ["baseline4"]  # baseline3 (LLMatic) excluded
 
 TASKS = ["death", "stay", "readmission", "next_diag_6m_pheno", "next_diag_12m_pheno"]
 TASK_DISPLAY = {
