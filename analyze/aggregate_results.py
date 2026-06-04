@@ -50,7 +50,7 @@ import pandas as pd
 #   - inflating Table 1 with extra rows
 #   - polluting Wilcoxon (would compare MAS vs ablations as if "baselines")
 #   - skewing arch/cost audits
-MAIN_METHODS = ["baseline1", "baseline2", "baseline4", "mas"]  # baseline0 (Random) and baseline3 (LLMatic) excluded
+MAIN_METHODS = ["baseline0", "baseline1", "baseline2", "baseline4", "mas"]  # baseline3 (LLMatic) excluded
 
 # Fig 5 robustness ablation only — these methods are extra MAS variants, not baselines.
 # Used exclusively by build_loto_ablation_table(). Layer factorial design:
