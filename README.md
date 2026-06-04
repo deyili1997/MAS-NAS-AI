@@ -27,43 +27,43 @@
    - **Experiment Agent** — runs supernet finetune, tracks composite-rank best-so-far, and at each round-end decides EXPLORATION vs EXPLOITATION for the next round.
 
 2. **Two-Layer Cross-Hospital Prior** (`mas_search.py:gather_historical_context`, `shap_analysis.py`, `run_meta_regression.py`)
-   - **Layer 1 — Dataset-similarity retrieval**: pick the most similar source hospital by 20-D dataset profile cosine; retrieve top-k concrete architecture exemplars from that source's metadata. Graceful 6-D task-feature fallback when target task is missing in source (Plan A).
-   - **Layer 2 — Architecture-effect prior**: pool ~700 (arch, task) rows across 8 source hospitals → XGBoost surrogate + SHAP TreeExplainer → categorical mixed-effect models with `hospital` random intercept → `architecture_prior.json` with preferred / discouraged levels, interaction rules, and confidence labels for LLM consumption.
+   - **Layer 1 — Task-driven hospital selection**: for each target task `t`, select the source hospital whose **task-specific feature vector** (label entropy, positive ratio, task type, time horizon) is most similar to the target — rather than using a single dataset-level cosine. This ensures, e.g., death-task architectures are retrieved from a source with a similar mortality rate, not merely similar overall EHR token densities. A graceful dataset-level cosine fallback is used for the LOTO ablation (preserving its original "Plan A" semantics).
+   - **Layer 2 — Architecture-effect prior**: pool ~2,000 (arch, task) rows across 4 diverse source hospitals → XGBoost surrogate + SHAP TreeExplainer → categorical mixed-effect models with `hospital` random intercept → `architecture_prior.json` with preferred / discouraged levels and confidence labels for LLM consumption.
 
 3. **AutoFormer-style Weight-Sharing Supernet** (`model/supernet_transformer.py`)
    Pretrain once per hospital (MLM objective), then evaluate ~100 sub-architectures cheaply via column slicing on shared weights. Ranking validity verified against from-scratch training (Fig 3 in paper).
 
 4. **4-Condition Factorial Ablation** (Plan v2 / `mas_search.py:_method_name`)
-   `mas` / `mas_layer1_only` / `mas_loto` / `mas_cold` isolate Layer 2's incremental value, Layer 1 task-fallback degradation, and the standalone value of multi-agent reasoning.
+   `mas` / `mas_layer1_only` / `mas_loto` / `mas_cold` isolate Layer 2's incremental value, and the contribution of task-driven vs dataset-level hospital selection (LOTO reverts to dataset-level to preserve its original "Plan A fallback" semantics), and the standalone value of multi-agent reasoning.
 
 5. **Production-grade Reproducibility** (`analyze/aggregate_results.py`, `analyze/plot_*.py`)
-   5 seeds × 5 tasks × 9 methods × 2 target hospitals = **450 NAS jobs**; paired Wilcoxon + Holm-Bonferroni significance tests; full audit trails (every LLM prompt + response logged via `utils/tracer.py`); incremental CSV save survives 14-day SLURM wall.
+   5 seeds × 5 tasks × 9 methods × 2 target hospitals = **450 NAS jobs**; Bootstrap 95% CI significance tests (1000 resamples); full audit trails (every LLM prompt + response logged via `utils/tracer.py`); incremental CSV save survives 14-day SLURM wall.
 
 ---
 
 ## Method at a Glance
 
 ```
-                4 arch features × N archs × 5 tasks × 8 source hospitals
+                4 arch features × N archs × 5 tasks × 4 source hospitals
                         │  (Stage A: run_pipeline.py)
                         ▼
-            metadata.csv × 8    ────  dataset_summary.csv × 8
+            metadata.csv × 4    ────  dataset_summary.csv × 4
                    │                            │
         ┌──────────┴──────────┐                 │
-        ▼ pool per task       ▼ (matched src,   ▼ hospital cosine
+        ▼ pool per task       ▼ (matched src,   ▼ task-feature cosine
                                 matched task)     → matched source
-   XGBoost surrogate     top-k arch retrieval     │
-   + SHAP + mixed-effect + 4 metrics per row      │
-        │                     │                   │
-        ▼                     │                   │
+   XGBoost surrogate     top-k arch retrieval     │  (per task t:
+   + SHAP + mixed-effect + 4 metrics per row      │   label_entropy,
+        │                     │                   │   positive_ratio,
+        ▼                     │                   │   task_type)
    architecture_prior.json    │                   │
    (Layer 2)                  ▼ Layer 1           │
         └─────────────┬───────┘                   │
                       ▼                           │
-          context dict  ◀──────  _compute_target_summary
+          context dict  ◀──────  _compute_target_task_label_stats
                       │
                       ▼
-          Markdown prompt → Claude (Sonnet 4.6)
+          Markdown prompt → Claude (claude-3.5-haiku)
           (Proposal / Critic / Strategy agents)
                       │
                       ▼
@@ -92,9 +92,10 @@ Total combinatorial space = 256 architectures; ≈ 100–200 valid after the 2M-
 
 ## Data + Tasks
 
-**Hospitals** (10 total):
-- **8 OneFL+ private sites** (`source_1`, `source_3`, `source_4`, `source_10`, `source_11`, `source_14`, `source_15`, `source_16`) used as the cross-hospital prior pool.
-- **MIMIC-III** + **MIMIC-IV** as held-out NAS targets — the cross-hospital generalization test.
+**Hospitals**:
+- **Prior pool (4 OneFL+ sites)**: `source_1`, `source_4`, `source_14`, `source_16` — selected for maximum diversity in lab/procedure/diagnosis density profiles.
+- **Internal test**: `source_15` (OneFL+ site, excluded from prior; 7% mortality rate, no class collapse).
+- **External test**: `MIMIC-IV` — cross-institutional generalization benchmark.
 
 **5 Downstream Tasks**:
 | Task | Type | Horizon |
@@ -118,11 +119,11 @@ Total combinatorial space = 256 architectures; ≈ 100–200 valid after the 2M-
 - Random search · Evolutionary Algorithm · LLM-1shot · LLMatic · CoLLM-NAS
 
 **4-condition Ablation factorial**:
-| Method | Layer 1 | Layer 2 | Isolates |
+| Method | Layer 1 hospital selection | Layer 2 | Isolates |
 |---|---|---|---|
-| `mas` (full) | ✅ exact match | ✅ ON | full prior contribution |
-| `mas_layer1_only` | ✅ exact match | ❌ OFF | **Layer 2 incremental value** |
-| `mas_loto` | ⚠ forced cosine fallback | ✅ ON | Layer 1 task-fallback degradation |
+| `mas` (full) | ✅ task-driven | ✅ ON | full prior contribution |
+| `mas_layer1_only` | ✅ task-driven | ❌ OFF | **Layer 2 incremental value** |
+| `mas_loto` | ⚠ dataset-level + drop exact task records → Plan A fallback | ✅ ON | **task-driven vs dataset-level selection** |
 | `mas_cold` | ❌ OFF | ❌ OFF | pure multi-agent reasoning value |
 
 ---
@@ -132,10 +133,10 @@ Total combinatorial space = 256 architectures; ≈ 100–200 valid after the 2M-
 | Layer | Tools |
 |---|---|
 | Deep learning | PyTorch, AutoFormer-style supernet (custom), AdamW, BCE / CE losses, MLM pretraining |
-| LLM agents | Anthropic Claude API (claude-sonnet-4.6) — Proposal / Critic / Strategy roles |
+| LLM agents | Anthropic Claude API (`claude-3.5-haiku` via OpenRouter) — Proposal / Critic / Strategy roles |
 | Surrogate modeling | XGBoost regressor + SHAP TreeExplainer |
 | Mixed-effect statistics | `statsmodels.MixedLM` (per-feature signed-SHAP ~ level + (1\|hospital)); OLS+cluster-robust SE fallback |
-| Significance testing | Paired Wilcoxon signed-rank + Holm-Bonferroni multiple-comparison correction |
+| Significance testing | Bootstrap 95% CI (1000 resamples, paired by seed) |
 | Distributed compute | SLURM on HiPerGator (UF), L4 GPUs, ~750 total GPU-hours budgeted |
 | Reproducibility | 5 seeds, incremental CSV writes (survive wall timeouts), `search_meta.json` logs LLM call counts + wall-clock per run |
 
