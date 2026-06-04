@@ -1,4 +1,4 @@
-# MAS-NAS: Multi-Agent Neural Architecture Search for EHR Transformers
+# ATHENA: Multi-Agent Neural Architecture Search for EHR Transformers
 
 > A 3-agent LLM-driven NAS controller that **outperforms 5 baselines using 70% less compute** on longitudinal Electronic Health Record (EHR) Transformer design — validated at production scale across 10 hospitals and 5 clinical prediction tasks.
 
