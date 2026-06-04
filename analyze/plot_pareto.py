@@ -30,7 +30,7 @@ import numpy as np
 import pandas as pd
 
 
-METHODS = ["baseline0", "baseline1", "baseline2", "baseline4", "mas"]  # baseline3 (LLMatic) excluded
+METHODS = ["baseline1", "baseline2", "baseline4", "mas"]  # baseline0 (Random) and baseline3 (LLMatic) excluded
 METHOD_DISPLAY = {
     "baseline0": "Random",
     "baseline1": "EA",
