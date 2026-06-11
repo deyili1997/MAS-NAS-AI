@@ -110,7 +110,7 @@ python baselines/baseline0.py "${COMMON_ARGS[@]}" \
   && green "baseline0 completed" \
   || { red "baseline0 failed"; tail -5 "$SMOKE_RESULTS/baseline0.log"; }
 
-echo "  Running baseline2 (LLM-1shot)..."
+echo "  Running baseline2 (GENIUS)..."
 python baselines/baseline2.py "${COMMON_ARGS[@]}" \
   --model google/gemini-2.5-flash-lite \
   > "$SMOKE_RESULTS/baseline2.log" 2>&1 \

@@ -116,7 +116,7 @@ Total combinatorial space = 256 architectures; ≈ 100–200 valid after the 2M-
 ## Baselines + Ablations
 
 **5 Baselines** (`baselines/baseline{0..4}.py`):
-- Random search · Evolutionary Algorithm · LLM-1shot · LLMatic · CoLLM-NAS
+- Random search · Evolutionary Algorithm · GENIUS · LLMatic · CoLLM-NAS
 
 **4-condition Ablation factorial**:
 | Method | Layer 1 hospital selection | Layer 2 | Isolates |
@@ -151,7 +151,7 @@ agents/
 ├── critic_agent.py                # Constraint + soft-signal evaluator (LLM)
 └── experiment_agent.py            # Finetune runner + Strategy decider
 model/supernet_transformer.py       # AutoFormer-style weight-shared supernet
-baselines/baseline{0..4}.py         # 5 NAS baselines (Random, EA, LLM-1shot, LLMatic, CoLLM-NAS)
+baselines/baseline{0..4}.py         # 5 NAS baselines (Random, EA, GENIUS, LLMatic, CoLLM-NAS)
 run_pipeline.py                     # Stage A: pretrain + finetune 100 archs × 5 tasks per hospital
 run_regression.py                   # Supernet vs from-scratch ranking validity (Fig 3)
 shap_analysis.py                    # Per-task pooled SHAP across hospitals (Fig 4)

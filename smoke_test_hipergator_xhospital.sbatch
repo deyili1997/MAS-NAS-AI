@@ -295,7 +295,7 @@ CKPT_PATH="${RESULTS_ROOT}/${TARGET_HOSPITAL}/checkpoint_mlm/mlm_model.pt"
 [ -f "${CKPT_PATH}" ] || fail "Pretrain ckpt missing: ${CKPT_PATH}. Run Stage 0 first."
 ok "Reusing warm ckpt: ${CKPT_PATH}"
 
-BASELINE_NAMES=("Random" "EA" "LLM-1shot" "LLMatic" "CoLLM-NAS")
+BASELINE_NAMES=("Random" "EA" "GENIUS" "LLMatic" "CoLLM-NAS")
 total_runs=$((5 * ${#SMOKE_TASKS[@]}))
 counter=0
 for i in 0 1 2 3 4; do

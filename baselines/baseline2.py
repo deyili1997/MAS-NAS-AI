@@ -1,6 +1,9 @@
 """
-Single-LLM Baseline for EHR Transformer NAS
-=============================================
+GENIUS Baseline for EHR Transformer NAS
+=========================================
+Adapted from GENIUS (Zheng et al., 2023, "Can GPT-4 Perform Neural Architecture
+Search?", arXiv:2304.10970): a single-LLM iterative NAS framework.
+
 A fair-comparison baseline for MAS-NAS. Uses a single LLM call per iteration
 (no multi-agent propose/critique/revise). Each iteration:
   1. Build a prompt containing ALL previously evaluated architectures + their
@@ -325,7 +328,7 @@ def _propose_one(search_state, max_params, client, model, hospital, task,
 # ---------------------------------------------------------------------------
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Single-LLM baseline for EHR Transformer NAS")
+    p = argparse.ArgumentParser(description="GENIUS (single-LLM) baseline for EHR Transformer NAS")
 
     # Target
     p.add_argument("--hospital", type=str, required=True)
@@ -455,7 +458,7 @@ def main():
     client = OpenRouterClient()
 
     # =========================================================================
-    # Single-LLM search loop
+    # GENIUS single-LLM search loop
     # =========================================================================
     search_state = {
         "completed_experiments": [],
@@ -524,7 +527,7 @@ def main():
     # Save search results
     # =========================================================================
     print(f"\n{'='*60}")
-    print("Single-LLM Search Complete")
+    print("GENIUS Search Complete")
     print(f"{'='*60}")
 
     val_results = search_state["completed_experiments"]
