@@ -539,6 +539,135 @@ def build_efficiency_table(
 
 
 # ---------------------------------------------------------------------------
+# Rigorous efficiency table — budget-to-target + trajectory dominance ★★
+# ---------------------------------------------------------------------------
+def _cummax_by_seed(results_root, hospital, method, task, records, horizon):
+    """Return {seed: cumulative-max val_auprc array of length `horizon`}.
+
+    The best-so-far curve is forward-filled to `horizon`: once a method's search
+    terminates (e.g. duplicate saturation at <30 evals), its best-so-far stays
+    flat thereafter. This makes trajectories comparable at every budget k.
+    """
+    out = {}
+    for s in get_seeds(records, method, task):
+        search_csv = (
+            results_root / f"seed_{s}" / hospital / "search"
+            / method / task / f"{method}_search.csv"
+        )
+        if not search_csv.exists():
+            continue
+        try:
+            df = pd.read_csv(search_csv)
+        except Exception:
+            continue
+        if "val_auprc" not in df.columns:
+            continue
+        if "iteration" not in df.columns:
+            df["iteration"] = range(1, len(df) + 1)
+        df = df.sort_values("iteration").reset_index(drop=True)
+        vals = df["val_auprc"].dropna().values
+        if len(vals) == 0:
+            continue
+        cm = np.maximum.accumulate(vals)
+        if len(cm) < horizon:
+            cm = np.concatenate([cm, np.full(horizon - len(cm), cm[-1])])
+        else:
+            cm = cm[:horizon]
+        out[s] = cm
+    return out
+
+
+def build_efficiency_v2_table(
+    results_root: Path,
+    hospital: str,
+    records: dict,
+    output_path: Path,
+    horizon: int = 30,
+    mas_method: str = "mas",
+) -> pd.DataFrame:
+    """Assumption-free efficiency analysis addressing the 'baseline may also
+    plateau early' confound.
+
+    For each (task, baseline) the per-seed best-so-far (cumulative-max) curves
+    are compared at MATCHED evaluation counts. We report, per seed then averaged:
+
+      • baseline_final_auprc : baseline's lifetime-best (best-so-far at horizon)
+      • athena_final_auprc   : ATHENA's lifetime-best
+      • k_baseline_to_own_best : earliest eval the baseline FIRST reaches its OWN
+                                 lifetime-best (i.e. when the baseline plateaus).
+                                 This neutralizes the trap: we do NOT assume the
+                                 baseline needs the full budget.
+      • k_athena_to_baseline_best : earliest eval ATHENA reaches the baseline's
+                                    lifetime-best quality (capped at horizon if
+                                    never reached within budget).
+      • athena_reach_rate    : fraction of seeds where ATHENA reaches the
+                               baseline's lifetime-best within the horizon.
+      • speedup_evals        : k_baseline / k_athena (>1 ⇒ ATHENA faster).
+      • dominance_frac       : fraction of budgets k∈[1,horizon] where ATHENA's
+                               MEAN best-so-far ≥ the baseline's MEAN best-so-far
+                               (trajectory dominance, read off Fig 1).
+
+    Efficiency is claimed ONLY when ATHENA reaches the baseline's own plateau
+    quality in fewer evaluations than the baseline itself needs.
+    """
+    rows = []
+    for task in TASKS:
+        A = _cummax_by_seed(results_root, hospital, mas_method, task, records, horizon)
+        if not A:
+            continue
+        for method in MAIN_METHODS:
+            if method == mas_method:
+                continue
+            B = _cummax_by_seed(results_root, hospital, method, task, records, horizon)
+            common = sorted(set(A) & set(B))
+            if not common:
+                continue
+
+            kA_list, kB_list, reach_list = [], [], []
+            qb_list, qa_list = [], []
+            for s in common:
+                a, b = A[s], B[s]
+                qb = float(b[-1])              # baseline lifetime-best
+                qa = float(a[-1])              # ATHENA lifetime-best
+                qb_list.append(qb); qa_list.append(qa)
+                # earliest eval baseline reaches its OWN best
+                kB = int(np.argmax(b >= qb - 1e-12)) + 1
+                # earliest eval ATHENA reaches baseline's best
+                geq = np.where(a >= qb - 1e-12)[0]
+                if len(geq) > 0:
+                    kA = int(geq[0]) + 1
+                    reach_list.append(1)
+                else:
+                    kA = horizon              # conservative cap
+                    reach_list.append(0)
+                kA_list.append(kA); kB_list.append(kB)
+
+            a_mean = np.mean([A[s] for s in common], axis=0)
+            b_mean = np.mean([B[s] for s in common], axis=0)
+            dom_frac = float(np.mean(a_mean >= b_mean - 1e-12))
+
+            kA_mean = float(np.mean(kA_list))
+            kB_mean = float(np.mean(kB_list))
+            rows.append({
+                "task": TASK_DISPLAY[task],
+                "baseline": METHOD_DISPLAY[method],
+                "baseline_final_auprc_pct": round(float(np.mean(qb_list)) * 100, 2),
+                "athena_final_auprc_pct":   round(float(np.mean(qa_list)) * 100, 2),
+                "k_baseline_to_own_best":   round(kB_mean, 1),
+                "k_athena_to_baseline_best": round(kA_mean, 1),
+                "athena_reach_rate":        round(float(np.mean(reach_list)), 2),
+                "speedup_evals":            round(kB_mean / kA_mean, 2) if kA_mean > 0 else None,
+                "dominance_frac":           round(dom_frac, 2),
+                "horizon":                  horizon,
+                "n_seeds":                  len(common),
+            })
+
+    df = pd.DataFrame(rows)
+    df.to_csv(output_path, index=False)
+    return df
+
+
+# ---------------------------------------------------------------------------
 # LOTO + Cold-start robustness ablation — Fig 5 companion table ★
 # ---------------------------------------------------------------------------
 def build_loto_ablation_table(records: dict, output_path: Path) -> pd.DataFrame:
@@ -754,6 +883,17 @@ def main():
         )
         if len(df_eff) > 0:
             print(df_eff.to_string(index=False))
+        else:
+            print("  (empty — no search.csv found at expected path)")
+
+        print(f"\n[2b/{hospital}] — Rigorous efficiency (budget-to-target + trajectory dominance)")
+        df_eff2 = build_efficiency_v2_table(
+            results_root, hospital, records,
+            out_dir / f"efficiency_v2_table{suf}.csv",
+            horizon=args.baseline_budget,
+        )
+        if len(df_eff2) > 0:
+            print(df_eff2.to_string(index=False))
         else:
             print("  (empty — no search.csv found at expected path)")
 
