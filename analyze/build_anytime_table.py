@@ -101,7 +101,7 @@ def main():
         rows = []
         for method in METHOD_ORDER:
             for task in TASK_ORDER:
-                for cutoff in [10, 20, 30]:
+                for cutoff in [5, 10, 20, 30]:
                     sub = hsel[(hsel["method"] == method) &
                                (hsel["task"] == task) &
                                (hsel["cutoff"] == cutoff)]

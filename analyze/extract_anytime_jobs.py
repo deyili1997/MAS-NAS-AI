@@ -49,7 +49,7 @@ import pandas as pd
 
 METHODS = ["baseline0", "baseline1", "baseline2", "baseline4", "mas"]
 TASKS = ["death", "stay", "readmission", "next_diag_6m_pheno", "next_diag_12m_pheno"]
-CUTOFFS = [10, 20, 30]
+CUTOFFS = [5, 10, 20, 30]
 VAL_COLS = ["val_accuracy", "val_f1", "val_auroc", "val_auprc"]
 ARCH_COLS = ["embed_dim", "depth", "mlp_ratio", "num_heads"]
 
@@ -76,11 +76,28 @@ def main():
     ap.add_argument("--results_root", required=True, type=Path)
     ap.add_argument("--hospitals", required=True, nargs="+")
     ap.add_argument("--out_dir", required=True, type=Path)
+    ap.add_argument("--skip_existing_dir", type=Path, default=None,
+                    help="Directory of completed retest JSONs. Archs already "
+                         "evaluated there are excluded from the rerun list (their "
+                         "test value is reused at table-build time).")
     args = ap.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     selection_rows = []
     rerun_keys = set()   # (hospital, task, seed, embed_dim, depth, mlp_ratio, num_heads)
+
+    # Pre-load already-completed retest arch keys to avoid re-running them
+    existing = set()
+    if args.skip_existing_dir and args.skip_existing_dir.exists():
+        for jf in args.skip_existing_dir.glob("*.json"):
+            try:
+                d = __import__("json").load(open(jf))
+                existing.add((d["hospital"], d["task"], int(d["seed"]),
+                              int(d["embed_dim"]), int(d["depth"]),
+                              int(d["mlp_ratio"]), int(d["num_heads"])))
+            except Exception:
+                pass
+        print(f"  [skip] {len(existing)} archs already in {args.skip_existing_dir}")
 
     seed_dirs = sorted(args.results_root.glob("seed_*"))
     seeds = [int(d.name.split("_", 1)[1]) for d in seed_dirs
@@ -126,9 +143,12 @@ def main():
                                 source = "best_csv"
                             else:
                                 source = "rerun"
-                                rerun_keys.add((hospital, task, seed,
-                                                arch["embed_dim"], arch["depth"],
-                                                arch["mlp_ratio"], arch["num_heads"]))
+                                akey = (hospital, task, seed,
+                                        arch["embed_dim"], arch["depth"],
+                                        arch["mlp_ratio"], arch["num_heads"])
+                                # Only queue a re-run if not already test-evaluated
+                                if akey not in existing:
+                                    rerun_keys.add(akey)
                         selection_rows.append({
                             "hospital": hospital, "method": method, "task": task,
                             "seed": seed, "cutoff": cutoff,
