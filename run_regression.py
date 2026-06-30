@@ -201,6 +201,7 @@ def pretrain_supernet(args, vocab_size, max_adm, train_loader, val_loader, devic
                 and existing.get("mlp_ratio") == float(args.mlp_ratio)
                 and existing.get("vocab_size") == int(vocab_size)
                 and existing.get("max_adm_num") == int(max_adm)
+                and existing.get("choices") == CHOICES
             )
             if match:
                 print(f"[SupernetPretrain] ✓ Reusing existing supernet ckpt: {ckpt_path}")
@@ -300,6 +301,7 @@ def pretrain_supernet(args, vocab_size, max_adm, train_loader, val_loader, devic
     # `weights_only=True` loadable (PyTorch 2.6+ default).
     ckpt = {
         "model_state_dict": snapshot_sd_cpu(model.state_dict()),
+        "choices": CHOICES,
         "vocab_size": int(vocab_size),
         "embed_dim": int(args.embed_dim),
         "depth": int(args.depth),

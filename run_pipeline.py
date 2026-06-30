@@ -245,6 +245,7 @@ def pretrain(args, tokenizer, pretrain_data, max_adm, device):
                 and existing.get("mlp_ratio") == float(args.mlp_ratio)
                 and existing.get("vocab_size") == int(vocab_size)
                 and existing.get("max_adm_num") == int(max_adm)
+                and existing.get("choices") == CHOICES
             )
             if match:
                 print(f"[Pretrain] ✓ Reusing existing supernet ckpt: {ckpt_path}")
@@ -256,6 +257,8 @@ def pretrain(args, tokenizer, pretrain_data, max_adm, device):
             print(f"  Requested: embed_dim={args.embed_dim}, depth={args.depth}, "
                   f"num_heads={args.num_heads}, mlp_ratio={args.mlp_ratio}, "
                   f"vocab_size={vocab_size}, max_adm_num={max_adm}")
+            if existing.get("choices") != CHOICES:
+                print(f"  → search space CHOICES changed; supernet retrained on the new grid")
 
     model = TransformerSuper(
         num_classes=0,
