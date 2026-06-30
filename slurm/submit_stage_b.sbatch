@@ -88,10 +88,16 @@ CKPT=/blue/mei.liu/lideyi/MAS-NAS/results/${HOSPITAL}/checkpoint_mlm/mlm_model.p
 RESULTS_DIR=/blue/mei.liu/lideyi/MAS-NAS/results/seed_${SEED}
 HISTORY_ROOT=/blue/mei.liu/lideyi/MAS-NAS/results
 
+# Parameter budget for constrained NAS. Override per budget-sweep level, e.g.
+#   sbatch --export=ALL,MAX_PARAMS=1000000 slurm/submit_stage_b.sbatch
+# Tight (~1e6) is binding and forces allocation tradeoffs; loose (~3e6) ≈ today's
+# near-unconstrained regime. Defaults to the loose reference if unset.
+MAX_PARAMS=${MAX_PARAMS:-3000000}
+
 COMMON_ARGS=(
     --hospital $HOSPITAL
     --task $TASK
-    --max_params 4000000
+    --max_params $MAX_PARAMS
     --flops_seq_len 512
     --ckpt_path $CKPT
     --results_dir $RESULTS_DIR
