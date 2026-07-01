@@ -81,12 +81,12 @@ Each round consumes 1–3 architectures from a budget of 100; full method descri
 
 | Dimension | Choices | Notes |
 |---|---|---|
-| `embed_dim` | {32, 64, 128, 256} | constraint: `embed_dim % num_heads == 0` |
-| `depth` | {1, 2, 4, 8} | number of transformer layers |
-| `mlp_ratio` | {1, 2, 4, 8} | constant across layers |
+| `embed_dim` | {32, 48, 64, 96, 128, 192, 256} | constraint: `embed_dim % num_heads == 0` (all values divisible by 8, so every pairing is valid) |
+| `depth` | {1, 2, 3, 4, 6, 8} | number of transformer layers |
+| `mlp_ratio` | {1, 2, 3, 4, 6, 8} | constant across layers |
 | `num_heads` | {1, 2, 4, 8} | constant across layers |
 
-Total combinatorial space = 256 architectures; ≈ 100–200 valid after the 2M-parameter budget.
+Total combinatorial space = 7 × 6 × 6 × 4 = **1008 architectures** (within the supernet max dims 256/8/8/8, so no larger supernet is needed). The feasible subset depends on the parameter budget `MAX_PARAMS` (set per Stage-B run): default **3M** (near-unconstrained reference) vs. a binding **1M** (constrained-NAS setting). Parameter count is dominated by the vocabulary embedding, so the budget primarily bounds `embed_dim`.
 
 ---
 
