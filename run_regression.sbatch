@@ -5,7 +5,10 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem-per-cpu=16gb
+# 10gb x 4 = 40GB per job. Regression peaks at ~25GB; the old 16gb (64GB/job)
+# was heavily over-requested and, with many jobs concurrent, exhausted the QOS
+# group memory quota -> jobs killed mid-run with Reason=QOSGrpMemLimit.
+#SBATCH --mem-per-cpu=10gb
 #SBATCH --time=168:00:00
 #SBATCH --output=/blue/mei.liu/lideyi/MAS-NAS/slurm_logs/%x_%j.out
 #SBATCH --error=/blue/mei.liu/lideyi/MAS-NAS/slurm_logs/%x_%j.err
