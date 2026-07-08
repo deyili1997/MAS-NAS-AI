@@ -20,9 +20,9 @@
 #SBATCH --mem-per-cpu=10gb
 #SBATCH --partition=hpg-turin
 #SBATCH --gres=gpu:l4:1
-# 48h: num_archs=300 supernet-finetunes take ~20h (~4 min/arch); the old 12h
-# was sized for 100 archs and would time out at 300.
-#SBATCH --time=48:00:00
+# 72h (safety margin): num_archs=300 supernet-finetunes take ~20h (~4 min/arch,
+# worst case ~35h); 12h was sized for 100 archs and would time out at 300.
+#SBATCH --time=72:00:00
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=lideyi@ufl.edu
 #SBATCH --output=/blue/mei.liu/lideyi/MAS-NAS/slurm_logs/pipe-%x-%j.out
