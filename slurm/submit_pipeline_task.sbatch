@@ -14,10 +14,15 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem-per-cpu=16gb
+# 10gb x 4 = 40GB per job. 16gb (64GB) over-requested and, with many jobs
+# concurrent, exhausted the QOS group mem quota -> killed mid-run (see
+# run_regression.sbatch). Stage-0 finetune peaks well under 40GB.
+#SBATCH --mem-per-cpu=10gb
 #SBATCH --partition=hpg-turin
 #SBATCH --gres=gpu:l4:1
-#SBATCH --time=12:00:00
+# 48h: num_archs=300 supernet-finetunes take ~20h (~4 min/arch); the old 12h
+# was sized for 100 archs and would time out at 300.
+#SBATCH --time=48:00:00
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=lideyi@ufl.edu
 #SBATCH --output=/blue/mei.liu/lideyi/MAS-NAS/slurm_logs/pipe-%x-%j.out
@@ -66,7 +71,7 @@ python run_pipeline.py \
     --drop_rate 0.1 \
     --attn_drop_rate 0.1 \
     --drop_path_rate 0.1 \
-    --num_archs 100 \
+    --num_archs 300 \
     --flops_seq_len 512 \
     --output_dir $TASK_TMP \
     --num_workers 4 \
