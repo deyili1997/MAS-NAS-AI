@@ -33,7 +33,9 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem-per-cpu=12gb
+# 10gb x 4 = 40GB/job — 12gb (48GB) x %20 array risks the QOS group mem quota;
+# Stage-B search+finetune peaks well under 40GB (see run_regression.sbatch).
+#SBATCH --mem-per-cpu=10gb
 #SBATCH --partition=hpg-turin
 #SBATCH --gres=gpu:l4:1
 #SBATCH --time=12:00:00
@@ -126,7 +128,12 @@ COMMON_ARGS=(
 # loading paths). Baselines 0-4 don't define this argparse flag and would
 # crash with "unrecognized arguments" if it leaked through COMMON_ARGS. Keep
 # it scoped to the mas variants only.
-MAS_EXTRA=(--history_root $HISTORY_ROOT --exclude_from_layer1 source_15 \
+# Layer 1 candidate pool must match the prior pool (source_1/4/14/16) so MAS
+# retrieves only NEW-1008-grid architecture examples. Exclude the test hospitals
+# (source_15/MIMIC-IV) and the stale 256-grid hospitals (source_3/10/11) — else
+# Layer 1 pulls old-grid examples (same contamination as the SHAP glob).
+MAS_EXTRA=(--history_root $HISTORY_ROOT \
+           --exclude_from_layer1 source_15 MIMIC-IV source_3 source_10 source_11 \
            --model anthropic/claude-3.5-haiku)
 
 case "$METHOD" in
