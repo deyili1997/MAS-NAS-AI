@@ -86,26 +86,43 @@ def _fit_main_effects(shap_df: pd.DataFrame, feature: str) -> pd.DataFrame:
         levels = sorted(shap_df[feature].unique())
         ref_level = levels[0]   # statsmodels default: lowest sorted level
 
+        z = float(norm.ppf(0.5 + CI_LEVEL / 2))   # ≈ 1.96 for 95%
         for lvl in levels:
             sub = shap_df[shap_df[feature] == lvl]
+            # Group-mean SE for this level — always well-defined, used as a
+            # fallback when the MixedLM combined SE blows up (see guard below).
+            vals = sub[f"shap_{feature}"].to_numpy()
+            se_group = (float(vals.std(ddof=1) / np.sqrt(len(vals)))
+                        if len(vals) > 1 else float("nan"))
             if lvl == ref_level:
-                est = intercept
-                ci_lo, ci_hi = float(intercept_ci[0]), float(intercept_ci[1])
+                est = float(intercept)
+                lo, hi = float(intercept_ci[0]), float(intercept_ci[1])
+                se_mixed = ((hi - lo) / (2 * z)
+                            if np.isfinite(lo) and np.isfinite(hi) else float("inf"))
             else:
                 key = f"C({feature})[T.{lvl}]"
                 if key not in params.index:
                     continue
-                est = intercept + params[key]
-                # Sum of variance for intercept + offset (approximate, ignores covariance)
-                # Better: use linear combination through params/cov
+                est = float(intercept + params[key])
+                # Combined SE of (intercept + level offset) via the design contrast.
                 contrast = np.zeros(len(params))
                 contrast[params.index.get_loc("Intercept")] = 1.0
                 contrast[params.index.get_loc(key)] = 1.0
                 cov = model.cov_params().values
-                se_combined = float(np.sqrt(contrast @ cov @ contrast))
-                z = float(norm.ppf(0.5 + CI_LEVEL / 2))   # ≈ 1.96 for 95%
-                ci_lo = est - z * se_combined
-                ci_hi = est + z * se_combined
+                se_mixed = float(np.sqrt(contrast @ cov @ contrast))
+            # MixedLM cov_params can blow up (SE ~1e7 while est ~1e2) when the
+            # random-intercept variance is near-singular: the point estimate stays
+            # valid but the exploded SE makes every level's CI straddle 0 → all
+            # neutral → empty preferred/discouraged. Fall back to the level's
+            # group-mean SE whenever the MixedLM SE is non-finite or >50x it.
+            if not np.isfinite(se_mixed) or (
+                np.isfinite(se_group) and se_mixed > 50 * max(se_group, 1e-9)
+            ):
+                se_use, mtype = se_group, "mixedlm+group_se"
+            else:
+                se_use, mtype = se_mixed, "mixedlm"
+            ci_lo = est - z * se_use if np.isfinite(se_use) else float("nan")
+            ci_hi = est + z * se_use if np.isfinite(se_use) else float("nan")
 
             rows.append({
                 "feature": feature,
@@ -115,7 +132,7 @@ def _fit_main_effects(shap_df: pd.DataFrame, feature: str) -> pd.DataFrame:
                 "ci_hi": float(ci_hi),
                 "n_rows": int(len(sub)),
                 "n_hospitals": int(sub["hospital"].nunique()),
-                "model_type": "mixedlm",
+                "model_type": mtype,
             })
         return pd.DataFrame(rows)
 
