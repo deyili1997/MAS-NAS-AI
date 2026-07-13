@@ -87,7 +87,6 @@ cd /home/lideyi/MAS-NAS
 # WILL BE INVALID (different methods using different hyperparams = unfair).
 # -----------------------------------------------------------------------------
 CKPT=/blue/mei.liu/lideyi/MAS-NAS/results/${HOSPITAL}/checkpoint_mlm/mlm_model.pt
-RESULTS_DIR=/blue/mei.liu/lideyi/MAS-NAS/results/seed_${SEED}
 HISTORY_ROOT=/blue/mei.liu/lideyi/MAS-NAS/results
 
 # Parameter budget for constrained NAS. Override per budget-sweep level, e.g.
@@ -95,6 +94,12 @@ HISTORY_ROOT=/blue/mei.liu/lideyi/MAS-NAS/results
 # Tight (~1e6) is binding and forces allocation tradeoffs; loose (~3e6) ≈ today's
 # near-unconstrained regime. Defaults to the loose reference if unset.
 MAX_PARAMS=${MAX_PARAMS:-3000000}
+
+# Search outputs are namespaced by budget so the tight/loose sweep levels don't
+# overwrite each other. Supernet ckpt + prior/metadata (HISTORY_ROOT) are
+# budget-independent and stay shared. Analysis reads per-budget:
+#   --results_dir /blue/.../results/budget_1000000  (etc.)
+RESULTS_DIR=/blue/mei.liu/lideyi/MAS-NAS/results/budget_${MAX_PARAMS}/seed_${SEED}
 
 COMMON_ARGS=(
     --hospital $HOSPITAL
