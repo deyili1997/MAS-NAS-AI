@@ -48,7 +48,7 @@ COMMON_ARGS=(
 MAS_EXTRA=(
   --history_root "$HISTORY_ROOT"
   --exclude_from_layer1 source_15 MIMIC-IV source_3 source_10 source_11
-  --model anthropic/claude-3.5-haiku
+  --model anthropic/claude-haiku-4.5
 )
 
 declare -a RESULTS=()
@@ -69,12 +69,12 @@ run baseline0 python baselines/baseline0.py "${COMMON_ARGS[@]}" --budget "$BUDGE
 run baseline1 python baselines/baseline1.py "${COMMON_ARGS[@]}" --budget "$BUDGET" \
     --population_num 8 --select_num 4 --mutation_num 4 --crossover_num 4 --m_prob 0.3
 run baseline2 python baselines/baseline2.py "${COMMON_ARGS[@]}" --budget "$BUDGET" \
-    --model anthropic/claude-3.5-haiku
+    --model anthropic/claude-haiku-4.5
 run baseline3 python baselines/baseline3.py "${COMMON_ARGS[@]}" --budget "$BUDGET" \
-    --model anthropic/claude-3.5-haiku --temperature 0.7 \
+    --model anthropic/claude-haiku-4.5 --temperature 0.7 \
     --n_niches 16 --random_init_frac 0.3 --mutation_prob 0.85 --temp_jitter 0.1 --top_n_select 3
 run baseline4 python baselines/baseline4.py "${COMMON_ARGS[@]}" --budget "$BUDGET" \
-    --model anthropic/claude-3.5-haiku \
+    --model anthropic/claude-haiku-4.5 \
     --navigator_temperature 0.7 --generator_temperature 0.7 --candidates_per_iter 3
 run mas             python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget "$BUDGET"
 run mas_loto        python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget "$BUDGET" --exclude_exact_task_from_history

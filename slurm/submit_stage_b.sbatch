@@ -139,7 +139,7 @@ COMMON_ARGS=(
 # Layer 1 pulls old-grid examples (same contamination as the SHAP glob).
 MAS_EXTRA=(--history_root $HISTORY_ROOT \
            --exclude_from_layer1 source_15 MIMIC-IV source_3 source_10 source_11 \
-           --model anthropic/claude-3.5-haiku)
+           --model anthropic/claude-haiku-4.5)
 
 case "$METHOD" in
   baseline0)
@@ -151,16 +151,16 @@ case "$METHOD" in
     ;;
   baseline2)
     python baselines/baseline2.py "${COMMON_ARGS[@]}" --budget 30 \
-        --model anthropic/claude-3.5-haiku
+        --model anthropic/claude-haiku-4.5
     ;;
   baseline3)
     python baselines/baseline3.py "${COMMON_ARGS[@]}" --budget 30 \
-        --model anthropic/claude-3.5-haiku --temperature 0.7 \
+        --model anthropic/claude-haiku-4.5 --temperature 0.7 \
         --n_niches 16 --random_init_frac 0.3 --mutation_prob 0.85 --temp_jitter 0.1 --top_n_select 3
     ;;
   baseline4)
     python baselines/baseline4.py "${COMMON_ARGS[@]}" --budget 30 \
-        --model anthropic/claude-3.5-haiku \
+        --model anthropic/claude-haiku-4.5 \
         --navigator_temperature 0.7 --generator_temperature 0.7 --candidates_per_iter 3
     ;;
   mas)
