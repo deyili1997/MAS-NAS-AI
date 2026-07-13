@@ -112,13 +112,19 @@ def _fit_main_effects(shap_df: pd.DataFrame, feature: str) -> pd.DataFrame:
                 se_mixed = float(np.sqrt(contrast @ cov @ contrast))
             # MixedLM cov_params can blow up (SE ~1e7 while est ~1e2) when the
             # random-intercept variance is near-singular: the point estimate stays
-            # valid but the exploded SE makes every level's CI straddle 0 → all
-            # neutral → empty preferred/discouraged. Fall back to the level's
-            # group-mean SE whenever the MixedLM SE is non-finite or >50x it.
-            if not np.isfinite(se_mixed) or (
-                np.isfinite(se_group) and se_mixed > 50 * max(se_group, 1e-9)
-            ):
-                se_use, mtype = se_group, "mixedlm+group_se"
+            # valid but the exploded SE makes every CI straddle 0 → empty prior.
+            # Detect this by ABSOLUTE blow-up relative to the effect size. A real
+            # cluster-robust SE can be a few x |est|, but ~1e7-vs-~1e2 (SE >> |est|)
+            # is the pathology. NOTE: an earlier `se_mixed > 50*se_group` misfired
+            # on low-variance / single-hospital levels (se_group→0 collapsed the CI
+            # to a point → fabricated preferred/discouraged calls). The fallback SE
+            # is floored to a fraction of |est| so a near-zero within-level group SE
+            # can't collapse the CI.
+            est_scale = max(abs(est), 1e-9)
+            if (not np.isfinite(se_mixed)) or (se_mixed > 50 * est_scale):
+                se_use = (max(se_group, 0.1 * est_scale)
+                          if np.isfinite(se_group) else float("nan"))
+                mtype = "mixedlm+group_se"
             else:
                 se_use, mtype = se_mixed, "mixedlm"
             ci_lo = est - z * se_use if np.isfinite(se_use) else float("nan")
