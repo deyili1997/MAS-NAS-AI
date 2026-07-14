@@ -389,7 +389,7 @@ def _get_top_k_archs(metadata_df, hospital, task, max_params, top_k,
     return archs, matched_task, matched_similarity
 
 
-def _load_meta_regression_prior(history_root, task) -> dict:
+def _load_meta_regression_prior(history_root, task, prior_subdir="meta_regression") -> dict:
     """Load Layer 2 architecture_prior.json for the matched task.
 
     Per-task pooled prior produced by `run_meta_regression.py` (mixed-effect
@@ -402,8 +402,18 @@ def _load_meta_regression_prior(history_root, task) -> dict:
     Returns empty dict if file doesn't exist (Phase 1, or before Stage A.4 has
     been run). The agent prompts handle empty meta_regression_prior gracefully
     by skipping the architecture_prior section."""
-    prior_path = Path(history_root) / "meta_regression" / task / "architecture_prior.json"
+    prior_path = Path(history_root) / prior_subdir / task / "architecture_prior.json"
     if not prior_path.exists():
+        if prior_subdir != "meta_regression":
+            # A non-default (budget-aware) prior was explicitly requested but is
+            # missing. Fail LOUD instead of silently degrading to a no-prior run:
+            # a green SLURM job that quietly dropped the budget-aware prior would
+            # invalidate the constrained-NAS comparison with no visible red flag.
+            raise FileNotFoundError(
+                f"Requested budget-aware prior '{prior_subdir}' not found at {prior_path}. "
+                f"Generate it first (shap_analysis.py --max_params <budget> ... then "
+                f"run_meta_regression.py --output_dir <history_root>/{prior_subdir}), or "
+                f"pass --prior_subdir meta_regression to use the unconstrained prior.")
         print(f"  [Context] No meta-regression prior at {prior_path}")
         return {}
 
@@ -423,7 +433,8 @@ def gather_historical_context(hospital, task, max_params, history_root, top_k,
                               no_history=False,
                               no_meta_regression=False,
                               exclude_from_layer1=None,
-                              use_task_driven=True):
+                              use_task_driven=True,
+                              prior_subdir="meta_regression"):
     """
     Gather historical context for the target hospital and task.
 
@@ -607,7 +618,7 @@ def gather_historical_context(hospital, task, max_params, history_root, top_k,
         print("  [LAYER1-ONLY] --no_meta_regression set; skipping Layer 2 architecture_prior load.")
         meta_regression_prior = {}
     else:
-        meta_regression_prior = _load_meta_regression_prior(history_root, matched_task)
+        meta_regression_prior = _load_meta_regression_prior(history_root, matched_task, prior_subdir)
 
     return {
         "target_summary": target_summary,
@@ -655,6 +666,11 @@ def parse_args():
                         "<hospital>/metadata.csv, <hospital>/dataset_summary.csv, "
                         "shap_analysis/ live (always seed-independent). If unset, "
                         "defaults to --results_dir (backward-compatible single-seed mode).")
+    p.add_argument("--prior_subdir", type=str, default="meta_regression",
+                   help="Subdir under --history_root holding the per-task Layer-2 "
+                        "architecture_prior.json. Default 'meta_regression' (unconstrained "
+                        "prior). For a budget-aware prior, pass e.g. "
+                        "'meta_regression_budget1000000'.")
 
     # Robustness ablation flags (Fig 5)
     p.add_argument("--no_task_driven", action="store_true",
@@ -865,6 +881,7 @@ def main():
         no_meta_regression=args.no_meta_regression,
         exclude_from_layer1=args.exclude_from_layer1,
         use_task_driven=not args.no_task_driven,
+        prior_subdir=args.prior_subdir,
     )
 
     tracer.log_section("PHASE 0 — HISTORICAL CONTEXT")

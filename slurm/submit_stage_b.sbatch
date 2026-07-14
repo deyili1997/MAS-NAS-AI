@@ -137,7 +137,13 @@ COMMON_ARGS=(
 # retrieves only NEW-1008-grid architecture examples. Exclude the test hospitals
 # (source_15/MIMIC-IV) and the stale 256-grid hospitals (source_3/10/11) — else
 # Layer 1 pulls old-grid examples (same contamination as the SHAP glob).
+# --prior_subdir points MAS at the BUDGET-AWARE Layer-2 prior for THIS budget
+# (meta_regression_budget1000000 / _budget3000000), NOT the shared unconstrained
+# one. Must be generated first (shap_analysis --max_params + run_meta_regression
+# --output_dir results/meta_regression_budget${MAX_PARAMS}); mas_search hard-fails
+# if a non-default prior_subdir is requested but missing (no silent no-prior run).
 MAS_EXTRA=(--history_root $HISTORY_ROOT \
+           --prior_subdir meta_regression_budget${MAX_PARAMS} \
            --exclude_from_layer1 source_15 MIMIC-IV source_3 source_10 source_11 \
            --model anthropic/claude-haiku-4.5)
 

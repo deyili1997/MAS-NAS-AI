@@ -49,6 +49,11 @@ def parse_args():
                         "Phase 2 standard:  --hospitals OneFL_H1 OneFL_H2 ... OneFL_H10 "
                         "Phase 1 / single-hospital test:  --hospitals MIMIC-IV "
                         "(filter to 1 hospital → effectively per-hospital × per-task SHAP).")
+    p.add_argument("--max_params", type=int, default=None,
+                   help="If set, keep only architectures with num_params <= max_params "
+                        "before SHAP → builds a BUDGET-AWARE prior (the prior learns what "
+                        "works UNDER this parameter budget). Default None = unconstrained "
+                        "prior over all sampled architectures.")
     p.add_argument("--interaction_main", type=str, nargs="+",
                    default=["embed_dim"],
                    choices=ARCH_COLS,
@@ -61,7 +66,8 @@ def parse_args():
     return p.parse_args()
 
 
-def load_metadata(results_dir: str, hospitals_filter: list = None) -> pd.DataFrame:
+def load_metadata(results_dir: str, hospitals_filter: list = None,
+                  max_params: int = None) -> pd.DataFrame:
     """Load and concatenate all metadata.csv files across hospitals.
 
     Args:
@@ -87,6 +93,15 @@ def load_metadata(results_dir: str, hospitals_filter: list = None) -> pd.DataFra
             raise ValueError(
                 f"No rows remain after filtering. Hospitals in data: "
                 f"{df['hospital'].unique().tolist()}, requested: {hospitals_filter}.")
+    if max_params is not None:
+        before = len(df)
+        df = df[df["num_params"] <= max_params].reset_index(drop=True)
+        print(f"  Budget filter num_params <= {max_params:,}: {before} → {len(df)} rows "
+              f"(BUDGET-AWARE prior).")
+        if len(df) == 0:
+            raise ValueError(
+                f"No architectures with num_params <= {max_params:,} after pooling — "
+                f"loosen --max_params or check the metadata pool.")
     print(f"  Final pool: {df['hospital'].nunique()} hospital(s) "
           f"({df['hospital'].unique().tolist()}), {len(df)} rows total.")
     return df
@@ -332,7 +347,7 @@ def main():
         print(f"  [Auto] --output_dir not set → using {args.output_dir} "
               f"(aligned with --results_dir).")
 
-    df = load_metadata(args.results_dir, args.hospitals)
+    df = load_metadata(args.results_dir, args.hospitals, args.max_params)
     df = prepare_features(df)
 
     all_shap_summary = []
