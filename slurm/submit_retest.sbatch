@@ -25,8 +25,13 @@
 
 set -euo pipefail
 
-JOBS_TSV=/blue/mei.liu/lideyi/MAS-NAS/analyze/anytime/anytime_rerun_jobs.tsv
-OUT_DIR=/blue/mei.liu/lideyi/MAS-NAS/analyze/anytime/retest
+# Budget namespace — MUST match the MAX_PARAMS used for this budget's Stage B,
+# so the 1M and 3M anytime rerun lists + retest outputs never overwrite each
+# other. Pass via: sbatch --export=ALL,MAX_PARAMS=1000000 ... submit_retest.sbatch
+# CKPT_ROOT stays budget-free: the supernet checkpoint is shared across budgets.
+MAX_PARAMS=${MAX_PARAMS:-3000000}
+JOBS_TSV=/blue/mei.liu/lideyi/MAS-NAS/analyze/anytime/budget_${MAX_PARAMS}/anytime_rerun_jobs.tsv
+OUT_DIR=/blue/mei.liu/lideyi/MAS-NAS/analyze/anytime/budget_${MAX_PARAMS}/retest
 CKPT_ROOT=/blue/mei.liu/lideyi/MAS-NAS/results
 
 # Data row = array index + 1 (skip header)

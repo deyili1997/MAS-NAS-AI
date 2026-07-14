@@ -123,7 +123,7 @@ def _build_prompt(context, search_state, proposals, max_params, strategy=None,
         "proposal agent can fix it.\n\n"
         "**Two categories of constraints**:\n\n"
         "### 1. HARD constraints — auto-reject if violated\n"
-        "  - max_params budget exceeded (>2M unless overridden)\n"
+        "  - max_params budget exceeded (see the exact 'Maximum parameters' value stated above)\n"
         "  - embed_dim NOT divisible by num_heads\n"
         "  - exact duplicate of an already-tried architecture\n"
         "  - exact duplicate of a Top-k historical architecture (proposal duplicates known evidence)\n"
