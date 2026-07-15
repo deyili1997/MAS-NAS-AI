@@ -32,14 +32,16 @@ from model.supernet_transformer import TransformerSuper
 # ---------------------------------------------------------------------------
 # Search space
 # ---------------------------------------------------------------------------
-# MUST stay in sync with agents/search_space.py — finer 1008-arch grid within the
-# current supernet max dims (256/8/8/8); all embed_dim divisible by 8.
+# MUST stay in sync with agents/search_space.py — 256-arch grid (4x4x4x4),
+# identical to tag v1-orig-256grid. Key/value order feeds the subnet sampler, so
+# it is part of the experimental setup. Changing this invalidates the supernet
+# checkpoint (the cache below compares `choices` and forces a retrain).
 CHOICES = {
-    "embed_dim": [32, 48, 64, 96, 128, 192, 256],   # 7
-    "depth":     [1, 2, 3, 4, 6, 8],                 # 6
-    "mlp_ratio": [1, 2, 3, 4, 6, 8],                 # 6
-    "num_heads": [1, 2, 4, 8],                       # 4
-}   # = 1008 architectures
+    "mlp_ratio": [1, 2, 4, 8],
+    "num_heads": [1, 2, 4, 8],
+    "embed_dim": [32, 64, 128, 256],
+    "depth": [1, 2, 4, 8],
+}   # = 256 architectures
 
 TASKS = ALL_TASKS  # imported from task_registry
 
