@@ -288,6 +288,15 @@ def _parse_proposals(response_text):
 
 def _validate_proposal(proposal):
     """Basic validation of a single proposal."""
+    # Guard against malformed LLM output: some models occasionally return a bare
+    # array of scalars (e.g. [128, 4, 4, 8]) or otherwise non-dict elements
+    # instead of a list of proposal dicts. Without this, `proposal.get(...)`
+    # raised `'int' object has no attribute 'get'` and crashed the whole round
+    # (recoverable via the round-level retry, but 3 in a row abort the search).
+    # Treat any non-dict element as an invalid proposal and skip it.
+    if not isinstance(proposal, dict):
+        return False, f"proposal is not a dict (got {type(proposal).__name__})"
+
     embed_dim = proposal.get("embed_dim")
     depth = proposal.get("depth")
     mlp_ratio = proposal.get("mlp_ratio")

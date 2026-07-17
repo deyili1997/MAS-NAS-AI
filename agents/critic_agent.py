@@ -198,6 +198,13 @@ def _parse_critiques(response_text):
 
 def _validate_config(config):
     """Validate a config dict."""
+    # Guard against malformed LLM output (same failure mode as
+    # proposal_agent._validate_proposal): a non-dict element (e.g. a bare int
+    # from a `[128, 4, 4, 8]` response) would raise `'int' object has no
+    # attribute 'get'` and crash the round. Treat any non-dict as invalid.
+    if not isinstance(config, dict):
+        return False
+
     embed_dim = config.get("embed_dim")
     depth = config.get("depth")
     mlp_ratio = config.get("mlp_ratio")
