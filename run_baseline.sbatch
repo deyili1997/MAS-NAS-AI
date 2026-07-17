@@ -22,6 +22,11 @@ HOSPITAL=${HOSPITAL:-MIMIC-IV}
 BL=${BASELINE}
 TASK=${TASK}
 SEED=${SEED}
+# Search budget (evaluations). Default 30 to MATCH the reported 256 main table
+# (baseline0 has 30 rows; mas fewer due to Critic dedup). The old hard-coded 50
+# did NOT generate the main results — do not use it, or a new task's column
+# would get more budget than the rest and be unfairly advantaged.
+BUDGET=${BUDGET:-30}
 
 date; hostname; pwd
 echo "HOSPITAL=$HOSPITAL  BASELINE=$BL  TASK=$TASK  SEED=$SEED"
@@ -74,21 +79,21 @@ COMMON_ARGS=(
 MAS_EXTRA=(--history_root $HISTORY_ROOT)
 
 case $BL in
-  0) python baselines/baseline0.py "${COMMON_ARGS[@]}" --budget 50 ;;
-  1) python baselines/baseline1.py "${COMMON_ARGS[@]}" --budget 50 \
+  0) python baselines/baseline0.py "${COMMON_ARGS[@]}" --budget $BUDGET ;;
+  1) python baselines/baseline1.py "${COMMON_ARGS[@]}" --budget $BUDGET \
         --population_num 8 --select_num 4 --mutation_num 4 --crossover_num 4 --m_prob 0.3 ;;
-  2) python baselines/baseline2.py "${COMMON_ARGS[@]}" --budget 50 \
+  2) python baselines/baseline2.py "${COMMON_ARGS[@]}" --budget $BUDGET \
         --model google/gemini-2.5-flash-lite ;;
-  3) python baselines/baseline3.py "${COMMON_ARGS[@]}" --budget 50 \
+  3) python baselines/baseline3.py "${COMMON_ARGS[@]}" --budget $BUDGET \
         --model google/gemini-2.5-flash-lite --temperature 0.7 \
         --n_niches 16 --random_init_frac 0.3 --mutation_prob 0.85 --temp_jitter 0.1 --top_n_select 3 ;;
-  4) python baselines/baseline4.py "${COMMON_ARGS[@]}" --budget 50 \
+  4) python baselines/baseline4.py "${COMMON_ARGS[@]}" --budget $BUDGET \
         --model google/gemini-2.5-flash-lite \
         --navigator_temperature 0.7 --generator_temperature 0.7 --candidates_per_iter 3 ;;
-  mas) python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget 50 ;;
-  mas_loto) python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget 50 --exclude_exact_task_from_history ;;
-  mas_cold) python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget 50 --no_history ;;
-  mas_layer1_only) python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget 50 --no_meta_regression ;;
+  mas) python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget $BUDGET ;;
+  mas_loto) python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget $BUDGET --exclude_exact_task_from_history ;;
+  mas_cold) python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget $BUDGET --no_history ;;
+  mas_layer1_only) python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget $BUDGET --no_meta_regression ;;
   *) echo "Unknown baseline: $BL"; exit 1 ;;
 esac
 
