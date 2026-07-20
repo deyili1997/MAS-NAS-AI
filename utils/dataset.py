@@ -191,6 +191,11 @@ class FineTuneEHRDataset(PreTrainEHRDataset):
         self.task = task
         self._task_info = task_info(task)
         self.task_type = self._task_info["type"]   # "binary" or "multilabel"
+        # med_rec (standard drug recommendation): feed ONLY the target (last)
+        # visit's diagnoses as input; its medications are the label and its
+        # lab/procedure tokens are dropped. History visits stay full. Handled in
+        # __getitem__. Other tasks leave this False (full input, no masking).
+        self.target_visit_diag_only = self._task_info.get("target_visit_diag_only", False)
 
         # For multilabel tasks: drop rows where the original window column is NaN
         # (no future admission within the prediction horizon → no signal).
@@ -241,9 +246,16 @@ class FineTuneEHRDataset(PreTrainEHRDataset):
         token_types = [self.token_type_id_dict['[CLS]']]  # token type for CLS token
         adm_index = [self.cls_adm_index]
 
+        n_adm = len(admissions)
         for adm_i, adm in enumerate(admissions, start=1): # 0 is for [PAD]
+            is_target_visit = (adm_i == n_adm)   # last admission = the one we predict
             for type_i, codes in enumerate(adm):
                 code_type = self.token_type[type_i]
+                # med_rec: the target visit contributes ONLY its diagnoses; its
+                # med (=label) / lab / procedure tokens are dropped to prevent
+                # leakage. Other tasks leave target_visit_diag_only=False.
+                if self.target_visit_diag_only and is_target_visit and code_type != "diag":
+                    continue
                 type_id = self.token_type_id_dict[code_type]
                 for code in codes:
                     try:
