@@ -43,7 +43,10 @@ CKPT=/blue/mei.liu/lideyi/MAS-NAS/results/${HOSPITAL}/checkpoint_mlm/mlm_model.p
 
 # Per-seed results dir keeps each seed's CSVs isolated; aggregate_results.py
 # globs across results/seed_*/<hospital>/search/<baseline>/<task>/.
-RESULTS_DIR=/blue/mei.liu/lideyi/MAS-NAS/results/seed_${SEED}
+# RESULTS_ROOT can be overridden (e.g. an isolated dir for a baseline re-tune)
+# so a rerun does NOT overwrite the reported main-table results under results/.
+RESULTS_ROOT=${RESULTS_ROOT:-/blue/mei.liu/lideyi/MAS-NAS/results}
+RESULTS_DIR=${RESULTS_ROOT}/seed_${SEED}
 HISTORY_ROOT=/blue/mei.liu/lideyi/MAS-NAS/results    # hospital-level INPUT root (metadata.csv, shap_analysis/, checkpoint_mlm/) — shared across seeds
 
 COMMON_ARGS=(
@@ -81,7 +84,9 @@ MAS_EXTRA=(--history_root $HISTORY_ROOT)
 case $BL in
   0) python baselines/baseline0.py "${COMMON_ARGS[@]}" --budget $BUDGET ;;
   1) python baselines/baseline1.py "${COMMON_ARGS[@]}" --budget $BUDGET \
-        --population_num 8 --select_num 4 --mutation_num 4 --crossover_num 4 --m_prob 0.3 ;;
+        --population_num ${EA_POP:-8} --select_num ${EA_SEL:-4} \
+        --mutation_num ${EA_MUT:-4} --crossover_num ${EA_CROSS:-4} \
+        --m_prob ${EA_MPROB:-0.3} ;;
   2) python baselines/baseline2.py "${COMMON_ARGS[@]}" --budget $BUDGET \
         --model google/gemini-2.5-flash-lite ;;
   3) python baselines/baseline3.py "${COMMON_ARGS[@]}" --budget $BUDGET \
