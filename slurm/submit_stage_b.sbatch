@@ -153,7 +153,7 @@ case "$METHOD" in
     ;;
   baseline1)
     python baselines/baseline1.py "${COMMON_ARGS[@]}" --budget 30 \
-        --ea_variant ${EA_VARIANT:-aging} \
+        --ea_variant ${EA_VARIANT:-archive} \
         --population_num 8 --select_num 4 --mutation_num 4 --crossover_num 4 --m_prob 0.3
     ;;
   baseline2)

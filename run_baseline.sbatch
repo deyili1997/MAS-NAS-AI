@@ -83,11 +83,13 @@ MAS_EXTRA=(--history_root $HISTORY_ROOT)
 
 case $BL in
   0) python baselines/baseline0.py "${COMMON_ARGS[@]}" --budget $BUDGET ;;
-  # EA defaults to Aging/Regularized Evolution (Real et al. 2019). Override with
-  # EA_VARIANT=archive to get the SPOS/AutoFormer-style top-k archive search.
-  # Under 'aging', EA_MUT/EA_CROSS are ignored (mutation-only, one child per step).
+  # EA defaults to the 'archive' variant (SPOS/AutoFormer-style top-k archive
+  # search) — this is what the REPORTED results use. Set EA_VARIANT=aging for
+  # Aging/Regularized Evolution (Real et al. 2019); under 'aging', EA_MUT/EA_CROSS
+  # are ignored (mutation-only, one child per step). Never mix the two variants'
+  # numbers in one table.
   1) python baselines/baseline1.py "${COMMON_ARGS[@]}" --budget $BUDGET \
-        --ea_variant ${EA_VARIANT:-aging} \
+        --ea_variant ${EA_VARIANT:-archive} \
         --population_num ${EA_POP:-8} --select_num ${EA_SEL:-4} \
         --mutation_num ${EA_MUT:-4} --crossover_num ${EA_CROSS:-4} \
         --m_prob ${EA_MPROB:-0.3} ;;
