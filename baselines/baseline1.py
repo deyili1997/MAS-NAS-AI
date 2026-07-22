@@ -371,16 +371,19 @@ def parse_args():
     p.add_argument("--drop_path_rate", type=float, default=0.1)
 
     # Evolution-specific
-    p.add_argument("--ea_variant", type=str, default="archive",
-                   choices=["archive", "aging"],
-                   help="EA variant. 'archive' (DEFAULT, unchanged behaviour): parents "
-                        "are the top-`select_num` of ALL evaluated architectures; "
+    p.add_argument("--ea_variant", type=str, default="aging",
+                   choices=["aging", "archive"],
+                   help="EA variant. 'aging' (DEFAULT): Aging/Regularized Evolution "
+                        "(Real et al., AAAI 2019; the AmoebaNet search) — fixed-size "
+                        "FIFO population, tournament selection over `select_num` "
+                        "sampled members, mutation only, OLDEST member evicted each "
+                        "step (mutation_num/crossover_num unused). 'archive': parents "
+                        "are the top-`select_num` of ALL evaluated architectures, "
                         "offspring by mutation + crossover — the evolutionary search "
-                        "used by weight-sharing NAS (SPOS / AutoFormer). 'aging': "
-                        "Aging/Regularized Evolution (Real et al., AAAI 2019) — "
-                        "fixed-size FIFO population, tournament selection over "
-                        "`select_num` sampled members, mutation only, oldest member "
-                        "evicted each step (mutation_num/crossover_num unused).")
+                        "used by weight-sharing NAS (SPOS / AutoFormer). NOTE: results "
+                        "reported before this default flip were produced with "
+                        "'archive'; the two are NOT interchangeable, so state which "
+                        "variant a given table used.")
     p.add_argument("--population_num", type=int, default=8,
                    help="archive: initial random population size. "
                         "aging: the fixed FIFO population size P.")

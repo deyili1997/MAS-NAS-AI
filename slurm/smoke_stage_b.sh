@@ -67,6 +67,7 @@ run() {   # $1 = label, rest = command
 
 run baseline0 python baselines/baseline0.py "${COMMON_ARGS[@]}" --budget "$BUDGET"
 run baseline1 python baselines/baseline1.py "${COMMON_ARGS[@]}" --budget "$BUDGET" \
+    --ea_variant "${EA_VARIANT:-aging}" \
     --population_num 8 --select_num 4 --mutation_num 4 --crossover_num 4 --m_prob 0.3
 run baseline2 python baselines/baseline2.py "${COMMON_ARGS[@]}" --budget "$BUDGET" \
     --model anthropic/claude-haiku-4.5
