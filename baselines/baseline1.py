@@ -238,6 +238,92 @@ def _top_parents(search_state, k):
     return parents
 
 
+def _avg_ranks(search_state):
+    """Composite validation rank (lower = better) for every completed experiment,
+    aligned positionally with search_state['completed_experiments']."""
+    experiments = search_state["completed_experiments"]
+    if not experiments:
+        return []
+    df = pd.DataFrame(experiments)
+    ranks = pd.DataFrame()
+    for col in ["val_accuracy", "val_f1", "val_auroc", "val_auprc"]:
+        ranks[col] = df[col].rank(ascending=False, method="average")
+    return ranks.mean(axis=1).tolist()
+
+
+def _cfg_of(exp):
+    """Architecture config dict from a completed-experiment row."""
+    return {
+        "embed_dim": int(exp["embed_dim"]),
+        "depth": int(exp["depth"]),
+        "mlp_ratio": int(exp["mlp_ratio"]),
+        "num_heads": int(exp["num_heads"]),
+    }
+
+
+def _run_aging_evolution(search_state, visited, ckpt, train_loader, val_loader,
+                         device, args, vocab_size, max_adm, num_classes):
+    """Aging / Regularized Evolution (Real et al., AAAI 2019) — the AmoebaNet search.
+
+    Steady state: the population is a fixed-size FIFO queue. Each step samples
+    `select_num` individuals (tournament), mutates the best of them, evaluates the
+    child, appends it, and evicts the OLDEST member — not the worst. That ageing is
+    the regularizer: good-but-old solutions are dropped, trading exploitation for
+    sustained diversity. Mutation only (no crossover), per the original algorithm.
+
+    Args used: population_num = P (queue size), select_num = S (tournament size),
+    m_prob = per-scalar mutation probability. mutation_num / crossover_num are NOT
+    used by this variant (one child per step). The architecture finally reported is
+    still the best-ever evaluated (tracked in completed_experiments), so ageing
+    affects the search trajectory rather than the reporting rule.
+    """
+    from collections import deque
+
+    n_init = len(search_state["completed_experiments"])
+    if n_init == 0:
+        print("  No initial population; cannot run aging evolution.")
+        return
+
+    # Population holds INDICES into completed_experiments; deque evicts the oldest.
+    population = deque(range(n_init), maxlen=args.population_num)
+    step = 0
+    while search_state["budget_remaining"] > 0:
+        step += 1
+        ranks = _avg_ranks(search_state)
+        pool = list(population)
+        s = min(args.select_num, len(pool))
+        sampled = random.sample(pool, s)
+        parent_idx = min(sampled, key=lambda i: ranks[i])   # best of the tournament
+        parent = _cfg_of(search_state["completed_experiments"][parent_idx])
+
+        print(f"\n{'='*60}")
+        print(f"Aging step {step}: tournament {s}/{len(pool)} -> parent {parent} "
+              f"(budget remaining: {search_state['budget_remaining']})")
+        print(f"{'='*60}")
+
+        child = _generate_children([parent], 1, 0, args.m_prob, visited,
+                                   vocab_size, max_adm, args.max_params, num_classes,
+                                   args.max_flops, args.flops_seq_len)
+        if not child:
+            print("  No new valid mutant could be generated; stopping.")
+            break
+
+        before = len(search_state["completed_experiments"])
+        _evaluate_candidates(child, search_state, ckpt, train_loader, val_loader,
+                             device, args, vocab_size, max_adm, args.max_params,
+                             num_classes, tag=f"aging{step}",
+                             max_flops=args.max_flops, flops_seq_len=args.flops_seq_len)
+        after = len(search_state["completed_experiments"])
+        if after == before:
+            print("  Child was not evaluated (budget exhausted); stopping.")
+            break
+
+        evicted = population[0] if len(population) == population.maxlen else None
+        population.append(after - 1)
+        if evicted is not None:
+            print(f"  aged out individual #{evicted}  (population size {len(population)})")
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -285,8 +371,19 @@ def parse_args():
     p.add_argument("--drop_path_rate", type=float, default=0.1)
 
     # Evolution-specific
+    p.add_argument("--ea_variant", type=str, default="archive",
+                   choices=["archive", "aging"],
+                   help="EA variant. 'archive' (DEFAULT, unchanged behaviour): parents "
+                        "are the top-`select_num` of ALL evaluated architectures; "
+                        "offspring by mutation + crossover — the evolutionary search "
+                        "used by weight-sharing NAS (SPOS / AutoFormer). 'aging': "
+                        "Aging/Regularized Evolution (Real et al., AAAI 2019) — "
+                        "fixed-size FIFO population, tournament selection over "
+                        "`select_num` sampled members, mutation only, oldest member "
+                        "evicted each step (mutation_num/crossover_num unused).")
     p.add_argument("--population_num", type=int, default=8,
-                   help="Initial random population size")
+                   help="archive: initial random population size. "
+                        "aging: the fixed FIFO population size P.")
     p.add_argument("--select_num", type=int, default=4,
                    help="Number of parents kept each generation")
     p.add_argument("--mutation_num", type=int, default=4,
@@ -412,9 +509,14 @@ def main():
                          device, args, vocab_size, max_adm, args.max_params, num_classes,
                          tag="random", max_flops=args.max_flops, flops_seq_len=args.flops_seq_len)
 
-    # ----- Subsequent generations: mutation + crossover -----
+    # ----- Aging / Regularized Evolution variant (Real et al. 2019) -----
+    if args.ea_variant == "aging":
+        _run_aging_evolution(search_state, visited, ckpt, train_loader, val_loader,
+                             device, args, vocab_size, max_adm, num_classes)
+
+    # ----- Subsequent generations: mutation + crossover (archive variant) -----
     generation = 0
-    while search_state["budget_remaining"] > 0:
+    while args.ea_variant == "archive" and search_state["budget_remaining"] > 0:
         generation += 1
         print(f"\n{'='*60}")
         print(f"Generation {generation}: mutation + crossover "
