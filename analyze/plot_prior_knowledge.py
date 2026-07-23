@@ -136,6 +136,8 @@ def plot_combined_grid(task_dfs, out_path: Path):
             if ri == 0:
                 ax.set_title(FEATURE_LABEL[feat], fontsize=11)
             if ci == 0:
+                # One Nature-style letter per task-row, top-left of the first cell.
+                panel_label(ax, ri, dx=-0.22)
                 ax.set_ylabel(TASK_LABEL.get(task, task), fontsize=10, fontweight="bold")
             if ri == n - 1:
                 ax.set_xlabel("SHAP effect (95% CI)", fontsize=9)
@@ -157,7 +159,6 @@ def _find_level_effects(roots, task):
         if f.exists():
             return f
     return None
-    print(f"  ✓ {out_path}")
 
 
 def main():
