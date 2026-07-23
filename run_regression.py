@@ -393,15 +393,14 @@ def pretrain_single_arch(scalar_config, internal_config, args,
 
 
 # ---------------------------------------------------------------------------
-# 2x2 regression panel
+# Regression panel — AUPRC + AUROC only (the two threshold-free metrics the
+# manuscript reports; Accuracy/F1 are still in results.csv but not plotted).
 # ---------------------------------------------------------------------------
 def plot_regression_panel(df, output_path, hospital, task):
-    metric_pairs = [("accuracy", "Accuracy"),
-                    ("f1", "F1"),
-                    ("auroc", "AUROC"),
-                    ("auprc", "AUPRC")]
+    metric_pairs = [("auprc", "AUPRC"),
+                    ("auroc", "AUROC")]
 
-    fig, axes = plt.subplots(2, 2, figsize=(11, 10))
+    fig, axes = plt.subplots(1, 2, figsize=(11, 5.3))
     pearson_rows = []
 
     for ax, (key, label) in zip(axes.flat, metric_pairs):
