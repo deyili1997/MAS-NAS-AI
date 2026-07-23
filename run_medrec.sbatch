@@ -117,13 +117,12 @@ fi
 # -----------------------------------------------------------------------------
 if [[ "$MODE" == "prior" ]]; then
     # Pool the swept med_rec metadata into the Layer-2 prior. CPU-only, run once.
-    # Default pool = source_1/4/14/16, per the collaborator: this is the SHAP
-    # --hospitals set used to build the 5-task prior. It is NOT the same as the
-    # Layer-1 retrieval pool (which the source_hospital_distribution figure
-    # reflects), so do not "reconcile" the two by widening this.
-    # CONFIRM before the first prior run by reading the hospital column of the
-    # real results/shap_analysis/<task>/shap_values.csv on the server — that is
-    # the authoritative record of what built the 5-task prior. Match it here.
+    # Default pool = source_1/4/14/16. CONFIRMED: this is exactly the hospital
+    # set in every results/shap_analysis/<task>/shap_values.csv, i.e. the SHAP
+    # --hospitals used to build the 5-task prior. It is deliberately NOT the same
+    # as the Layer-1 metadata pool (all 8 OneFlorida sites + MIMIC-IV, from which
+    # retrieval matched {1,3,10,11,14,16}); the two are different mechanisms, so
+    # do not "reconcile" them by widening this.
     HOSPITALS=${HOSPITALS:-source_1 source_4 source_14 source_16}
     echo "prior pool HOSPITALS=$HOSPITALS"
 
