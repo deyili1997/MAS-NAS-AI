@@ -117,10 +117,14 @@ fi
 # -----------------------------------------------------------------------------
 if [[ "$MODE" == "prior" ]]; then
     # Pool the swept med_rec metadata into the Layer-2 prior. CPU-only, run once.
-    # Default pool = the 7 source sites (targets source_15 / MIMIC-IV excluded so
-    # no target contributes to a prior it later consumes). Confirm this matches
-    # the 5-task prior's pool before trusting the comparison.
-    HOSPITALS=${HOSPITALS:-source_1 source_3 source_4 source_10 source_11 source_14 source_16}
+    # Default pool = source_1/4/14/16, per the collaborator: this is the SHAP
+    # --hospitals set used to build the 5-task prior. It is NOT the same as the
+    # Layer-1 retrieval pool (which the source_hospital_distribution figure
+    # reflects), so do not "reconcile" the two by widening this.
+    # CONFIRM before the first prior run by reading the hospital column of the
+    # real results/shap_analysis/<task>/shap_values.csv on the server — that is
+    # the authoritative record of what built the 5-task prior. Match it here.
+    HOSPITALS=${HOSPITALS:-source_1 source_4 source_14 source_16}
     echo "prior pool HOSPITALS=$HOSPITALS"
 
     python shap_analysis.py \
