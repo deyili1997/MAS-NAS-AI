@@ -28,6 +28,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -35,6 +36,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+# Repo root on sys.path: this file is executed as `python analyze/<script>.py`,
+# so sys.path[0] is analyze/ and `utils` is not importable without this.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from utils.site_labels import site_label  # noqa: E402
 
 
 # Colors: MAS variants = same crimson family (intensity ~ amount of prior context),
@@ -232,7 +238,7 @@ def main():
             plot_panel(ax, all_scores, task)
 
         fig.suptitle(
-            f"Layer Ablation — {hospital}\n"
+            f"Layer Ablation — {site_label(hospital)}\n"
             f"(L1-only isolates Layer 2's contribution; LOTO tests Layer 1 fallback; cold removes both priors)",
             fontsize=12, y=1.04,
         )

@@ -21,6 +21,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -28,6 +29,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+# Repo root on sys.path: this file is executed as `python analyze/<script>.py`,
+# so sys.path[0] is analyze/ and `utils` is not importable without this.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from utils.site_labels import site_label  # noqa: E402
 
 
 METHODS = ["baseline0", "baseline1", "baseline2", "baseline4", "mas"]  # baseline3 (LLMatic) excluded
@@ -227,7 +233,7 @@ def main():
             plot_pareto_panel(ax, records, task)
 
         fig.suptitle(
-            f"Pareto front: # parameters vs validation AUPRC (per evaluated arch) — {hospital}\n"
+            f"Pareto front: # parameters vs validation AUPRC (per evaluated arch) — {site_label(hospital)}\n"
             f"Note: AUPRC here is from search-time validation, not test (only the chosen arch is test-evaluated).",
             fontsize=11, y=1.04,
         )

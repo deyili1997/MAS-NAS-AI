@@ -30,6 +30,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import sys
 import json
 from collections import Counter
 from pathlib import Path
@@ -39,6 +40,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+# Repo root on sys.path: this file is executed as `python analyze/<script>.py`,
+# so sys.path[0] is analyze/ and `utils` is not importable without this.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from utils.site_labels import site_label  # noqa: E402
 
 
 # Methods that actually exercise Layer 1 retrieval — the only runs where
@@ -157,11 +163,12 @@ def render_heatmap(ax, df_target: pd.DataFrame, target: str, all_sources: list[s
                         fontsize=7, color=color)
 
     ax.set_xticks(range(n_sources))
-    ax.set_xticklabels(all_sources, rotation=45, ha="right", fontsize=8)
+    ax.set_xticklabels([site_label(s) for s in all_sources],
+                       rotation=45, ha="right", fontsize=8)
     ax.set_yticks(range(n_tasks))
     ax.set_yticklabels([f"{TASK_DISPLAY[t]}\n(n={counts[i]})"
                         for i, t in enumerate(TASKS)], fontsize=8)
-    ax.set_title(f"Target: {target}", fontsize=11)
+    ax.set_title(f"Target: {site_label(target)}", fontsize=11)
     return im
 
 
@@ -248,7 +255,7 @@ def main():
 
     fig.suptitle(
         "Layer 1 source hospital selection across target × task\n"
-        f"Pool: {len(all_sources)} OneFL+ source hospitals; "
+        f"Pool: {len(all_sources)} OneFlorida+ source sites; "
         f"Layer-1 methods: {', '.join(LAYER1_METHODS)} (mas_cold excluded)",
         fontsize=11, y=1.04,
     )

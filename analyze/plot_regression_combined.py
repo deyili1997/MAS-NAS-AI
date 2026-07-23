@@ -53,6 +53,7 @@ Usage
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -61,6 +62,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
+
+# Repo root on sys.path: this file is executed as `python analyze/<script>.py`,
+# so sys.path[0] is analyze/ and `utils` is not importable without this.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from utils.site_labels import site_label  # noqa: E402
 
 
 # 5-task column order (left-to-right). Display labels are paper-friendly and
@@ -71,7 +77,7 @@ TASKS: list[tuple[str, str, str]] = [
     # (task_key, display_label, task_type)
     ("death",               "Mortality",          "binary"),
     ("stay",                "Stay > 7d",          "binary"),
-    ("readmission",         "Readmission (90d)",  "binary"),
+    ("readmission",         "Readmission (3M)",   "binary"),
     ("next_diag_6m_pheno",  "Phenotype (6m)",     "multilabel"),
     ("next_diag_12m_pheno", "Phenotype (12m)",    "multilabel"),
 ]
@@ -300,7 +306,7 @@ def main() -> None:
 
     fig.suptitle(
         f"AutoFormer-supernet ranking validity vs traditional pretrain+finetune "
-        f"({args.hospital})",
+        f"({site_label(args.hospital)})",
         fontsize=15, y=0.995,
     )
     # Leave headroom for both the suptitle (top) and the task-type group bands.
