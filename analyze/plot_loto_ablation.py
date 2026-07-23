@@ -64,10 +64,10 @@ BASELINE_DISPLAY = {
 }
 
 CONDITION_DISPLAY = {
-    "mas":             "MAS-NAS\n(exact)",
-    "mas_layer1_only": "MAS-NAS\n(L1-only)",
-    "mas_loto":        "MAS-NAS\n(LOTO)",
-    "mas_cold":        "MAS-NAS\n(cold)",
+    "mas":             "ATHENA\n(exact)",
+    "mas_layer1_only": "ATHENA\n(L1-only)",
+    "mas_loto":        "ATHENA\n(LOTO)",
+    "mas_cold":        "ATHENA\n(cold)",
 }
 
 LLM_BASELINE_METHODS = ["baseline4"]  # baseline3 (LLMatic) excluded
@@ -176,12 +176,7 @@ def plot_panel(ax, all_scores: dict, task: str):
                   color=colors, edgecolor="black", linewidth=0.6,
                   alpha=0.9, error_kw={"linewidth": 1.0})
 
-    # Annotate count of seeds above each bar (if std > 0)
-    for i, (m_pct, s_pct, n_seeds) in enumerate(zip(means_pct, stds_pct, ns)):
-        if n_seeds > 0:
-            ax.text(i, m_pct + s_pct + 0.4, f"n={n_seeds}",
-                    ha="center", va="bottom", fontsize=7, color="dimgray")
-
+    # (per-bar n=5 annotation removed — the seed count is stated in the caption)
 
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=8)
@@ -240,11 +235,7 @@ def main():
             panel_label(ax, panel_i)
             plot_panel(ax, all_scores, task)
 
-        fig.suptitle(
-            f"Layer Ablation — {site_label(hospital)}\n"
-            f"(L1-only isolates Layer 2's contribution; LOTO tests Layer 1 fallback; cold removes both priors)",
-            fontsize=12, y=1.04,
-        )
+        # No figure title — added in the manuscript.
         plt.tight_layout()
 
         out_path = out_dir / f"figure5_loto_robustness_{hospital}.png"

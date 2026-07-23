@@ -255,12 +255,7 @@ def main():
     cbar_ax = fig.add_axes([0.94, 0.18, 0.012, 0.65])
     fig.colorbar(last_im, cax=cbar_ax, label="Pick fraction\n(over seeds × Layer-1 methods)")
 
-    fig.suptitle(
-        "Layer 1 source hospital selection across target × task\n"
-        f"Pool: {len(all_sources)} OneFlorida+ source sites; "
-        f"Layer-1 methods: {', '.join(LAYER1_METHODS)} (mas_cold excluded)",
-        fontsize=11, y=1.04,
-    )
+    # No figure title — added in the manuscript.
 
     out_path = out_dir / "figure6_source_hospital_choice.png"
     plt.savefig(out_path, dpi=150, bbox_inches="tight")

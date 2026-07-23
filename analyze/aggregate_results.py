@@ -69,10 +69,10 @@ METHOD_DISPLAY = {
     "baseline2": "GENIUS",
     "baseline3": "LLMatic",
     "baseline4": "CoLLM-NAS",
-    "mas":             "MAS-NAS",
-    "mas_layer1_only": "MAS-NAS (L1-only)",
-    "mas_loto":        "MAS-NAS (LOTO)",
-    "mas_cold":        "MAS-NAS (cold)",
+    "mas":             "ATHENA",
+    "mas_layer1_only": "ATHENA (L1-only)",
+    "mas_loto":        "ATHENA (LOTO)",
+    "mas_cold":        "ATHENA (cold)",
 }
 
 # Methods that compete with MAS as upper-bound LLM-based baselines.

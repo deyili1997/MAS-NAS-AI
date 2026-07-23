@@ -43,7 +43,7 @@ METHOD_DISPLAY = {
     "baseline2": "GENIUS",
     "baseline3": "LLMatic",
     "baseline4": "CoLLM-NAS",
-    "mas": "MAS-NAS",
+    "mas": "ATHENA",
 }
 METHOD_COLOR = {
     "baseline0": "#888888",   # gray
@@ -215,10 +215,8 @@ def main():
             panel_label(ax, panel_i)
             plot_trajectory_panel(ax, records, task, args.metric, max_iter_global)
 
-        fig.suptitle(
-            f"Search trajectory — {site_label(hospital)} ({args.metric.replace('val_', '').upper()})",
-            fontsize=13, y=1.02,
-        )
+        # No figure title — added in the manuscript. site_label kept imported
+        # for the output filename / logs only.
         plt.tight_layout()
 
         out_path = out_dir / f"figure1_search_trajectory_{args.metric}_{hospital}.png"

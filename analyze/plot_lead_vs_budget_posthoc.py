@@ -253,9 +253,8 @@ def main():
         ax.set_title(site_label(hosp))
         ax.grid(alpha=0.3)
     axes[0][-1].legend(fontsize=8, loc="best")
-    fig.suptitle("Post-hoc budget simulation: ATHENA's lead does not grow as the budget tightens",
-                 fontsize=12)
-    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    # No figure title — added in the manuscript.
+    fig.tight_layout()
     png_path = out_dir / "figure4_lead_vs_budget_posthoc.png"
     fig.savefig(png_path, dpi=150, bbox_inches="tight")
     print(f"\n✅ wrote {png_path}")

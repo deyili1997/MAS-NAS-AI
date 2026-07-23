@@ -28,7 +28,7 @@ import pandas as pd
 
 METHOD_DISPLAY = {
     "baseline0": "Random", "baseline1": "EA", "baseline2": "GENIUS",
-    "baseline4": "CoLLM-NAS", "mas": "MAS-NAS",
+    "baseline4": "CoLLM-NAS", "mas": "ATHENA",
 }
 METHOD_ORDER = ["baseline0", "baseline1", "baseline2", "baseline4", "mas"]
 TASK_DISPLAY = {

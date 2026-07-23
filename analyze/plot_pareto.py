@@ -45,7 +45,7 @@ METHOD_DISPLAY = {
     "baseline2": "GENIUS",
     "baseline3": "LLMatic",
     "baseline4": "CoLLM-NAS",
-    "mas": "MAS-NAS",
+    "mas": "ATHENA",
 }
 METHOD_COLOR = {
     "baseline0": "#888888",
@@ -235,11 +235,7 @@ def main():
             panel_label(ax, panel_i)
             plot_pareto_panel(ax, records, task)
 
-        fig.suptitle(
-            f"Pareto front: # parameters vs validation AUPRC (per evaluated arch) — {site_label(hospital)}\n"
-            f"Note: AUPRC here is from search-time validation, not test (only the chosen arch is test-evaluated).",
-            fontsize=11, y=1.04,
-        )
+        # No figure title — added in the manuscript.
         plt.tight_layout()
 
         out_path = out_dir / f"figure2_pareto_{hospital}.png"
