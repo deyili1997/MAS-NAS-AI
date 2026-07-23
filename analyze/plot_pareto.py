@@ -68,9 +68,9 @@ TASKS = ["death", "stay", "readmission", "next_diag_6m_pheno", "next_diag_12m_ph
 TASK_DISPLAY = {
     "death": "Mortality",
     "stay": "Stay > 7d",
-    "readmission": "Readmit (3M)",
-    "next_diag_6m_pheno": "Phenotype 6M",
-    "next_diag_12m_pheno": "Phenotype 12M",
+    "readmission": "Readmission (3M)",
+    "next_diag_6m_pheno": "Phenotype (6M)",
+    "next_diag_12m_pheno": "Phenotype (12M)",
 }
 
 

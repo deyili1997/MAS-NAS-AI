@@ -46,8 +46,8 @@ FEATURE_LABEL = {"embed_dim": "Embedding dim", "depth": "Depth",
 # Row order + display names for the combined grid.
 TASK_ORDER = ["death", "stay", "readmission",
               "next_diag_6m_pheno", "next_diag_12m_pheno", "med_rec"]
-TASK_LABEL = {"death": "Mortality", "stay": "Stay > 7d", "readmission": "Readmit 3M",
-              "next_diag_6m_pheno": "Phenotype 6M", "next_diag_12m_pheno": "Phenotype 12M",
+TASK_LABEL = {"death": "Mortality", "stay": "Stay > 7d", "readmission": "Readmission (3M)",
+              "next_diag_6m_pheno": "Phenotype (6M)", "next_diag_12m_pheno": "Phenotype (12M)",
               "med_rec": "Drug Rec"}
 POS = "#2E8B57"    # sea green — CI entirely > 0 (preferred)
 NEG = "#DC143C"    # crimson   — CI entirely < 0 (discouraged)

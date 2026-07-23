@@ -78,8 +78,8 @@ TASKS: list[tuple[str, str, str]] = [
     ("death",               "Mortality",          "binary"),
     ("stay",                "Stay > 7d",          "binary"),
     ("readmission",         "Readmission (3M)",   "binary"),
-    ("next_diag_6m_pheno",  "Phenotype (6m)",     "multilabel"),
-    ("next_diag_12m_pheno", "Phenotype (12m)",    "multilabel"),
+    ("next_diag_6m_pheno",  "Phenotype (6M)",     "multilabel"),
+    ("next_diag_12m_pheno", "Phenotype (12M)",    "multilabel"),
 ]
 
 # 2-metric row order (top-to-bottom). Both threshold-free, both reported in
