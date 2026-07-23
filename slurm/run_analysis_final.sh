@@ -46,9 +46,16 @@ echo "── Fig 4: lead vs budget"
 python analyze/plot_lead_vs_budget_posthoc.py --results_root "$RESULTS" --hospitals $HOSPITALS \
   --caps 4000000 3000000 2000000 1000000 --out_dir "$OUT"
 
-# ── Prior-knowledge forest grid (Layer-2 prior; replaces the old retrieval figure)
-echo "── Prior knowledge: combined grid"
-python analyze/plot_prior_knowledge.py --combined --prior_root $PRIOR_ROOTS --out_dir "$OUT/prior_knowledge"
+# ── Prior-knowledge forest plots (Layer-2 prior; replaces the old retrieval figure)
+# Combined grid + one per-task figure. Tasks with no level_effects.csv in any
+# PRIOR_ROOT are skipped, so this runs clean before med_rec exists and fills in
+# the med_rec row/figure automatically once it does. `|| true` keeps a missing
+# task from tripping the run.
+echo "── Prior knowledge: combined grid + per-task"
+python analyze/plot_prior_knowledge.py --combined --prior_root $PRIOR_ROOTS --out_dir "$OUT/prior_knowledge" || true
+for T in death stay readmission next_diag_6m_pheno next_diag_12m_pheno med_rec; do
+  python analyze/plot_prior_knowledge.py --task "$T" --prior_root $PRIOR_ROOTS --out_dir "$OUT/prior_knowledge" || true
+done
 
 # ── Table II: anytime 5/10/20/30 (needs the pre-existing GPU re-test outputs)
 if [[ -d "$ANYTIME/retest" ]]; then
