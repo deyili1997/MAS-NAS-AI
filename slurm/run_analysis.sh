@@ -74,10 +74,6 @@ for B in "${BUDGETS[@]}"; do
     python analyze/plot_loto_ablation.py \
       --results_root "$RESULTS" --hospitals "$H" --out_dir "$OUT"
   done
-
-  echo ""; echo "[E.5] plot_source_hospital_choice  budget=$L"
-  python analyze/plot_source_hospital_choice.py \
-    --results_root "$RESULTS" --target_hospitals source_15 MIMIC-IV --out_dir "$OUT"
 done
 
 # ── Cross-budget / budget-independent artifacts (date root, OUTSIDE 1M/3M) ────
