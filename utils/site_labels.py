@@ -1,19 +1,20 @@
 """De-identified site labels for figures and tables.
 
 The OneFlorida+ contributor sites are stored on disk as `source_<N>` with
-non-contiguous N (1, 3, 4, 10, 11, 14, 15, 16) because the numbering comes from
-the data owner's original site index, and several sites were dropped during
-cohort selection (source_6 empty, source_9 too small, source_12 degenerate
-death rate). Printing those raw gaps in a paper invites the question "where did
-source_2 go?", so the manuscript renames them Site A..H.
+non-contiguous N because the numbering comes from the data owner's original site
+index. The paper uses exactly six cohorts: the four-site prior source pool
+{source_1, source_4, source_14, source_16}, the internal target (source_15) and
+the external target (MIMIC-IV). Printing raw `source_<N>` invites "where did the
+others go?", so the manuscript renames them Site A..E.
 
-Mapping rule: letters are assigned by ASCENDING source number, mechanically.
-This is deliberate — a mapping that happened to put the target cohort last
-would look like the labels were chosen after seeing the results.
+Mapping rule: the four pool sites are lettered A–D by ASCENDING source number,
+mechanically (so the labelling cannot look chosen after seeing the results); the
+internal target is Site E. source_3 / source_10 / source_11 were swept in earlier
+exploration but are NOT part of the paper's fixed pool and get no letter.
 
-    source_1 → A   source_10 → D   source_15 → G  (internal target)
-    source_3 → B   source_11 → E   source_16 → H
-    source_4 → C   source_14 → F   MIMIC-IV  → MIMIC-IV (public, keeps its name)
+    source_1  → A   source_16 → D
+    source_4  → B   source_15 → E  (internal target)
+    source_14 → C   MIMIC-IV  → MIMIC-IV (public, keeps its name)
 
 DISPLAY LAYER ONLY. Never use these labels to build a path, a glob, a filename
 or a `--hospital` argument: every results directory on disk is still named
@@ -24,15 +25,18 @@ titles, LaTeX cells.
 from __future__ import annotations
 
 # Raw on-disk cohort name → manuscript label.
+# The paper's prior source pool is exactly {source_1, source_4, source_14,
+# source_16}; those are lettered A–D by ascending contributor index. Site E is
+# the internal target (source_15); MIMIC-IV is the external target. source_3 /
+# source_10 / source_11 are NOT part of the paper — they were swept historically
+# but never enter the fixed prior pool, so they get no letter (they pass through
+# as their raw name, which is a visible signal if one ever appears in a figure).
 SITE_LABEL = {
     "source_1":  "Site A",
-    "source_3":  "Site B",
-    "source_4":  "Site C",
-    "source_10": "Site D",
-    "source_11": "Site E",
-    "source_14": "Site F",
-    "source_15": "Site G",
-    "source_16": "Site H",
+    "source_4":  "Site B",
+    "source_14": "Site C",
+    "source_16": "Site D",
+    "source_15": "Site E",   # internal target
     "MIMIC-IV":  "MIMIC-IV",
     "MIMIC-III": "MIMIC-III",
 }
