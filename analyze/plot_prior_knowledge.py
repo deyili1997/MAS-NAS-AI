@@ -122,10 +122,7 @@ def plot_combined_grid(task_dfs, out_path: Path):
     """
     n = len(task_dfs)
     fig, axes = plt.subplots(n, 4, figsize=(13, 1.9 * n + 0.8), squeeze=False)
-    n_hosp = None
     for ri, (task, df) in enumerate(task_dfs):
-        if n_hosp is None and "n_hospitals" in df:
-            n_hosp = int(df["n_hospitals"].max())
         for ci, feat in enumerate(FEATURE_ORDER):
             ax = axes[ri][ci]
             sub = df[df["feature"] == feat]
@@ -142,9 +139,7 @@ def plot_combined_grid(task_dfs, out_path: Path):
             if ri == n - 1:
                 ax.set_xlabel("SHAP effect (95% CI)", fontsize=9)
     _legend(fig)
-    if n_hosp:
-        fig.text(0.99, 0.005, f"prior pooled over {n_hosp} source sites",
-                 ha="right", va="bottom", fontsize=8, color="dimgray")
+    # (pool-size note removed — stated in the manuscript caption instead)
     fig.tight_layout(rect=[0, 0.02, 1, 1])
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
