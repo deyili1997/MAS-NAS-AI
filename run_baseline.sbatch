@@ -47,7 +47,12 @@ CKPT=/blue/mei.liu/lideyi/MAS-NAS/results/${HOSPITAL}/checkpoint_mlm/mlm_model.p
 # so a rerun does NOT overwrite the reported main-table results under results/.
 RESULTS_ROOT=${RESULTS_ROOT:-/blue/mei.liu/lideyi/MAS-NAS/results}
 RESULTS_DIR=${RESULTS_ROOT}/seed_${SEED}
-HISTORY_ROOT=/blue/mei.liu/lideyi/MAS-NAS/results    # hospital-level INPUT root (metadata.csv, shap_analysis/, checkpoint_mlm/) — shared across seeds
+# hospital-level INPUT root for mas (Layer 1 metadata.csv + Layer 2 prior). MUST
+# match the grid of this run. The live results/ tree was OVERWRITTEN by the 1008
+# retrain (metadata.csv now carries embed_dim 48/96/192), so a 256-grid run MUST
+# point history at the untouched 256 backup:
+#   sbatch --export=ALL,...,HISTORY_ROOT=/blue/.../results_orig_256grid run_baseline.sbatch
+HISTORY_ROOT=${HISTORY_ROOT:-/blue/mei.liu/lideyi/MAS-NAS/results_orig_256grid}
 
 COMMON_ARGS=(
     --hospital $HOSPITAL
@@ -79,7 +84,13 @@ COMMON_ARGS=(
 
 # --history_root is consumed only by mas_search.py (Layer 1 / Layer 2 prior
 # loading paths). Baselines 0-4 don't define this argparse flag.
-MAS_EXTRA=(--history_root $HISTORY_ROOT)
+# --include_layer1 hard-locks Layer 1 retrieval to the paper's four source sites
+# {1,4,14,16}, regardless of what else has metadata under HISTORY_ROOT (the
+# target self-excludes). Layer 2 is already fixed to the same four sites at
+# prior-BUILD time (shap_analysis --hospitals 1/4/14/16), so with HISTORY_ROOT
+# pointed at the 256 backup both layers use exactly {1,4,14,16}.
+MAS_EXTRA=(--history_root $HISTORY_ROOT \
+           --include_layer1 source_1 source_4 source_14 source_16)
 
 case $BL in
   0) python baselines/baseline0.py "${COMMON_ARGS[@]}" --budget $BUDGET ;;
