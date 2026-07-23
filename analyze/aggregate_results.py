@@ -84,9 +84,9 @@ TASKS = ["death", "stay", "readmission", "next_diag_6m_pheno", "next_diag_12m_ph
 TASK_DISPLAY = {
     "death": "Death",
     "stay": "Stay>7d",
-    "readmission": "Readmit-3M",
-    "next_diag_6m_pheno": "Pheno-6M",
-    "next_diag_12m_pheno": "Pheno-12M",
+    "readmission": "Readmission (3M)",
+    "next_diag_6m_pheno": "Phenotype (6M)",
+    "next_diag_12m_pheno": "Phenotype (12M)",
 }
 
 METRICS = ["test_accuracy", "test_f1", "test_auroc", "test_auprc"]
