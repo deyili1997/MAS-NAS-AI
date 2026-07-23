@@ -61,6 +61,25 @@ def get_processed_root(hospital: str) -> Path:
     return p
 
 
+def get_analyze_root() -> Path:
+    """Resolve the analyze/ output root across local/HPC.
+
+    On HPC: /blue/mei.liu/lideyi/MAS-NAS/analyze
+    On Mac: <project_root>/analyze
+    Not auto-created here — callers decide when to mkdir a dated subfolder.
+    """
+    base = _HPC_PROJECT_ROOT if _is_hpc() else _PROJECT_ROOT
+    return base / "analyze"
+
+
+def get_final_dir(date: str) -> Path:
+    """<analyze_root>/<date>_final — the dated folder that collects paper-ready
+    tables and figures (same convention as run_analysis_final.sh). `date` is a
+    YYYY-MM-DD string; the caller passes today's date (or an explicit one). Not
+    auto-created; mkdir at the leaf you actually write."""
+    return get_analyze_root() / f"{date}_final"
+
+
 def get_checkpoint_dir(hospital: str) -> Path:
     """Resolve where the pretrain MLM checkpoint (.pt, ~100-300 MB) lives.
 

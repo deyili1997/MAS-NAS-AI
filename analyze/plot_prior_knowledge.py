@@ -23,6 +23,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import datetime
 import sys
 from pathlib import Path
 
@@ -33,6 +34,10 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils.panel_labels import panel_label  # noqa: E402
+from utils.paths import get_final_dir  # noqa: E402
+
+# Prior figures live in their own subfolder of the dated final-results folder.
+PRIOR_SUBDIR = "prior_knowledge"
 
 # Fixed hyperparameter order + display names (matches the search space).
 FEATURE_ORDER = ["embed_dim", "depth", "num_heads", "mlp_ratio"]
@@ -105,8 +110,24 @@ def main():
                         "(e.g. .../results_medrec/meta_regression).")
     p.add_argument("--task", default="med_rec",
                    help="Task to plot (default: med_rec). One figure per task.")
-    p.add_argument("--out_dir", required=True)
+    p.add_argument("--out_dir", default=None,
+                   help="Output dir. Default: <analyze_root>/<--date>_final/"
+                        f"{PRIOR_SUBDIR}/ — created if missing, so a standalone run "
+                        "lands in today's final-results folder automatically.")
+    p.add_argument("--date", default=None,
+                   help="YYYY-MM-DD stamping the default final folder "
+                        "(<date>_final). Default: today. Ignored if --out_dir is given.")
     args = p.parse_args()
+
+    # Resolve output dir. Explicit --out_dir wins; otherwise default to the dated
+    # final-results folder's prior_knowledge/ subdir and create it if absent.
+    if args.out_dir:
+        out_dir = Path(args.out_dir)
+    else:
+        date = args.date or datetime.date.today().isoformat()
+        out_dir = get_final_dir(date) / PRIOR_SUBDIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[prior] out_dir={out_dir}")
 
     f = Path(args.prior_root) / args.task / "level_effects.csv"
     if not f.exists():
@@ -114,7 +135,7 @@ def main():
     df = pd.read_csv(f)
     print(f"[prior] {args.task}: {len(df)} level-effect rows, "
           f"pool n_hospitals={df['n_hospitals'].max() if 'n_hospitals' in df else '?'}")
-    plot_task(df, Path(args.out_dir) / f"figure_prior_{args.task}.png", args.task)
+    plot_task(df, out_dir / f"figure_prior_{args.task}.png", args.task)
 
 
 if __name__ == "__main__":
