@@ -451,10 +451,8 @@ def plot_regression_panel(df, output_path, hospital, task):
             "n": n,
         })
 
-    fig.suptitle(
-        f"AutoFormer vs Traditional Pretrain-Finetune — {hospital} / {task}",
-        fontsize=14,
-    )
+    # No figure title — the panel is assembled into a composite figure and the
+    # title is added in the manuscript. (hospital/task still name the output dir.)
     fig.tight_layout()
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
