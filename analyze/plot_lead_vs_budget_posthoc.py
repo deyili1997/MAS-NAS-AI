@@ -62,6 +62,12 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+# Repo root on sys.path: this file is executed as `python analyze/<script>.py`,
+# so sys.path[0] is analyze/ and `utils` is not importable without this.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from utils.site_labels import site_label  # noqa: E402
+from utils.panel_labels import panel_label  # noqa: E402
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -223,7 +229,8 @@ def main():
     x = list(range(len(caps)))
     xlabels = [cap_label(c) for c in caps]
 
-    for ax, hosp in zip(axes[0], hosps):
+    for panel_i, (ax, hosp) in enumerate(zip(axes[0], hosps)):
+        panel_label(ax, panel_i)
         sub = df[df.hospital == hosp]
         for task in TASKS:
             t = sub[sub.task == task]
@@ -243,14 +250,14 @@ def main():
         ax.set_xticklabels(xlabels)
         ax.set_xlabel("Parameter budget (looser → tighter)")
         ax.set_ylabel(f"ATHENA − best baseline ({args.metric}, pp)")
-        ax.set_title(hosp)
+        ax.set_title(site_label(hosp))
         ax.grid(alpha=0.3)
     axes[0][-1].legend(fontsize=8, loc="best")
     fig.suptitle("Post-hoc budget simulation: ATHENA's lead does not grow as the budget tightens",
                  fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     png_path = out_dir / "figure4_lead_vs_budget_posthoc.png"
-    fig.savefig(png_path, dpi=150)
+    fig.savefig(png_path, dpi=150, bbox_inches="tight")
     print(f"\n✅ wrote {png_path}")
 
 

@@ -45,6 +45,7 @@ import pandas as pd
 # so sys.path[0] is analyze/ and `utils` is not importable without this.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils.site_labels import site_label  # noqa: E402
+from utils.panel_labels import panel_label  # noqa: E402
 
 
 # Methods that actually exercise Layer 1 retrieval — the only runs where
@@ -245,7 +246,8 @@ def main():
         axes = [axes]
 
     last_im = None
-    for ax, target in zip(axes, targets_with_data):
+    for panel_i, (ax, target) in enumerate(zip(axes, targets_with_data)):
+        panel_label(ax, panel_i)
         last_im = render_heatmap(ax, df[df["target_hospital"] == target], target, all_sources)
 
     # Single colorbar

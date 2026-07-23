@@ -32,6 +32,7 @@ import pandas as pd
 # so sys.path[0] is analyze/ and `utils` is not importable without this.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils.site_labels import site_label  # noqa: E402
+from utils.panel_labels import panel_label  # noqa: E402
 
 
 METHODS = ["baseline0", "baseline1", "baseline2", "baseline4", "mas"]  # baseline3 (LLMatic) excluded
@@ -209,7 +210,8 @@ def main():
         if len(TASKS) == 1:
             axes = [axes]
 
-        for ax, task in zip(axes, TASKS):
+        for panel_i, (ax, task) in enumerate(zip(axes, TASKS)):
+            panel_label(ax, panel_i)
             plot_trajectory_panel(ax, records, task, args.metric, max_iter_global)
 
         fig.suptitle(
