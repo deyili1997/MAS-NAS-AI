@@ -41,11 +41,6 @@ for H in $HOSPITALS; do
   python analyze/plot_loto_ablation.py     --results_root "$RESULTS" --hospitals "$H" --out_dir "$OUT"
 done
 
-# ── Fig 4: post-hoc budget simulation (cross-hospital, one call)
-echo "── Fig 4: lead vs budget"
-python analyze/plot_lead_vs_budget_posthoc.py --results_root "$RESULTS" --hospitals $HOSPITALS \
-  --caps 4000000 3000000 2000000 1000000 --out_dir "$OUT"
-
 # ── Prior-knowledge forest plots (Layer-2 prior; replaces the old retrieval figure)
 # Combined grid + one per-task figure. Tasks with no level_effects.csv in any
 # PRIOR_ROOT are skipped, so this runs clean before med_rec exists and fills in
