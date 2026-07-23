@@ -35,6 +35,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils.site_labels import site_label  # noqa: E402
 from utils.panel_labels import panel_label  # noqa: E402
+from utils.fig_layout import panel_grid  # noqa: E402
 
 
 METHODS = ["baseline0", "baseline1", "baseline2", "baseline4", "mas"]  # baseline3 (LLMatic) excluded
@@ -226,7 +227,7 @@ def main():
             print(f"  ⚠ No records for {hospital}. Skipping.\n")
             continue
 
-        fig, axes = plt.subplots(1, len(TASKS), figsize=(4.5 * len(TASKS), 4.5), sharey=False)
+        fig, axes = panel_grid(len(TASKS))
         if len(TASKS) == 1:
             axes = [axes]
 
