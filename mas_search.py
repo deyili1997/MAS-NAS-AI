@@ -433,6 +433,7 @@ def gather_historical_context(hospital, task, max_params, history_root, top_k,
                               no_history=False,
                               no_meta_regression=False,
                               exclude_from_layer1=None,
+                              include_layer1=None,
                               use_task_driven=True,
                               prior_subdir="meta_regression"):
     """
@@ -498,16 +499,33 @@ def gather_historical_context(hospital, task, max_params, history_root, top_k,
               f"task-similarity fallback will degrade.")
         target_task_features = None
 
+    # Layer 1 candidate-pool filter. `include_layer1` is a hard ALLOW-LIST: when
+    # set, the pool is restricted to EXACTLY those source hospitals, independent of
+    # whatever else happens to have metadata under history_root. `exclude_from_layer1`
+    # is the older deny-list (self-exclusion of the target is separate from both).
+    # Applied identically at all three pool-loading points below.
+    def _restrict_pool(df, col="hospital"):
+        if df is None or df.empty:
+            return df
+        if include_layer1:
+            _keep = [h for h in include_layer1 if h != hospital]
+            df = df[df[col].isin(_keep)].copy()
+        if exclude_from_layer1:
+            _excl = [h for h in exclude_from_layer1 if h != hospital]
+            if _excl:
+                df = df[~df[col].isin(_excl)].copy()
+        return df
+
     historical_df = _load_historical_summaries(history_root)
 
-    # Exclude specified hospitals from Layer 1 candidate pool (e.g. internal test hospital)
-    if exclude_from_layer1:
-        _excl = [h for h in exclude_from_layer1 if h != hospital]  # keep self-exclusion separate
-        if _excl:
-            before = len(historical_df)
-            historical_df = historical_df[~historical_df["hospital"].isin(_excl)].copy()
-            print(f"  [Layer 1] Excluded from candidate pool: {_excl} "
-                  f"({before - len(historical_df)} rows dropped)")
+    # Restrict the Layer 1 candidate pool (allow-list and/or deny-list).
+    _n_before = len(historical_df)
+    historical_df = _restrict_pool(historical_df)
+    if include_layer1:
+        print(f"  [Layer 1] Restricted to allow-list {include_layer1}: "
+              f"{_n_before} → {len(historical_df)} rows, pool={sorted(historical_df['hospital'].unique()) if not historical_df.empty else []}")
+    elif exclude_from_layer1 and len(historical_df) != _n_before:
+        print(f"  [Layer 1] Excluded {exclude_from_layer1}: {_n_before - len(historical_df)} rows dropped")
 
     if historical_df.empty:
         # _load_historical_summaries already printed the dataset_summary.csv miss warning.
@@ -539,12 +557,7 @@ def gather_historical_context(hospital, task, max_params, history_root, top_k,
             pd.concat([pd.read_csv(f) for f in _meta_files_early], ignore_index=True)
             if _meta_files_early else pd.DataFrame()
         )
-        if exclude_from_layer1:
-            _excl_e = [h for h in exclude_from_layer1 if h != hospital]
-            if _excl_e and not _metadata_early.empty:
-                _metadata_early = _metadata_early[
-                    ~_metadata_early["hospital"].isin(_excl_e)
-                ].copy()
+        _metadata_early = _restrict_pool(_metadata_early)
         similar_hospital, sim_score = _find_most_similar_hospital_task_driven(
             task, target_task_features, _metadata_early, hospital
         )
@@ -577,11 +590,8 @@ def gather_historical_context(hospital, task, max_params, history_root, top_k,
     metadata_files = sorted(glob.glob(metadata_pattern))
     if metadata_files:
         metadata_df = pd.concat([pd.read_csv(f) for f in metadata_files], ignore_index=True)
-        # Also exclude internal test hospitals from metadata pool
-        if exclude_from_layer1:
-            _excl = [h for h in exclude_from_layer1 if h != hospital]
-            if _excl:
-                metadata_df = metadata_df[~metadata_df["hospital"].isin(_excl)].copy()
+        # Same allow-list / deny-list restriction as the summary pool above.
+        metadata_df = _restrict_pool(metadata_df)
     else:
         metadata_df = pd.DataFrame()
 
@@ -683,6 +693,13 @@ def parse_args():
                         "search and metadata retrieval). Use to prevent internal test hospitals "
                         "from entering the prior of other target hospitals. E.g. "
                         "--exclude_from_layer1 source_10")
+    p.add_argument("--include_layer1", type=str, nargs="+", default=[],
+                   metavar="HOSPITAL",
+                   help="Hard ALLOW-LIST for the Layer 1 candidate pool: restrict retrieval to "
+                        "EXACTLY these source hospitals, regardless of what else has metadata "
+                        "under --history_root. Belt-and-suspenders for a fixed source pool (the "
+                        "target is always self-excluded). E.g. --include_layer1 source_1 source_4 "
+                        "source_14 source_16")
     p.add_argument("--exclude_exact_task_from_history", action="store_true",
                    help="LOTO ablation: drop rows where task==target from metadata "
                         "before _get_top_k_archs, forcing the cosine-similarity "
@@ -880,6 +897,7 @@ def main():
         no_history=args.no_history,
         no_meta_regression=args.no_meta_regression,
         exclude_from_layer1=args.exclude_from_layer1,
+        include_layer1=args.include_layer1,
         use_task_driven=not args.no_task_driven,
         prior_subdir=args.prior_subdir,
     )

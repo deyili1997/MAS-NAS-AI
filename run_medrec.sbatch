@@ -194,7 +194,10 @@ COMMON_ARGS=(
     --num_workers 4
     --cudnn_benchmark
 )
-MAS_EXTRA=(--history_root $HISTORY_ROOT)
+# Hard-lock Layer 1 retrieval to the fixed source pool {1,4,14,16}, independent
+# of whatever has metadata under results_medrec (the target self-excludes).
+MAS_EXTRA=(--history_root $HISTORY_ROOT \
+           --include_layer1 source_1 source_4 source_14 source_16)
 
 case $METHOD in
   0) python baselines/baseline0.py "${COMMON_ARGS[@]}" --budget $BUDGET ;;
