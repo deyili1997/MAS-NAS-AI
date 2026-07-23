@@ -29,24 +29,37 @@
 # table, mirror the change here.
 #
 # Required env vars (via sbatch --export):
-#   MODE ∈ {search, regression}          (default: search)
+#   MODE ∈ {sweep, prior, search, regression}     (default: search)
 #
-#   MODE=search  — one (method, seed) search cell:
+# The med_rec pipeline runs in this ORDER; every stage writes ONLY to
+# results_medrec/, and the supernet is reused read-only from results/:
+#
+#   MODE=sweep — build the med_rec NAS metadata for ONE hospital (GPU). Reuses
+#     that hospital's existing supernet (asserted present, never re-pretrained)
+#     and finetunes num_archs sub-paths, writing results_medrec/<H>/metadata.csv
+#     and results_medrec/<H>/dataset_summary.csv. Run once per hospital that
+#     should feed the prior pool, plus each target.
+#       HOSPITAL (default MIMIC-IV)
+#
+#   MODE=prior — pool the swept metadata into the Layer-2 prior (CPU, once).
+#     Runs shap_analysis + run_meta_regression over the SOURCE pool, writing
+#     results_medrec/{shap_analysis,meta_regression}/med_rec/. Confirm HOSPITALS
+#     matches the pool used for the 5-task prior.
+#       HOSPITALS (default: the 7 source sites, targets excluded)
+#
+#   MODE=search — one (method, seed) search cell (GPU):
 #     METHOD ∈ {0,1,2,3,4,mas,mas_loto,mas_cold,mas_layer1_only}
 #     SEED   ∈ {111,123,456,789,999}
 #     HOSPITAL (default MIMIC-IV; use source_15 for the internal target)
+#     mas* additionally need MODE=prior to have completed. Baselines 0–4 do not.
+#
 #   MODE=regression — one (hospital) supernet-vs-scratch panel (k=150, seed 123):
 #     HOSPITAL (default MIMIC-IV)
 #
-# PREREQUISITES for MODE=search with the `mas*` methods (the cross-hospital
-# prior): the med_rec metadata + Layer-2 prior must already exist UNDER
-# results_medrec/ (built by the source sweep + shap_analysis + run_meta_regression,
-# all pointed at results_medrec). Baselines 0–4 need no prior and run immediately.
-#
 # Examples:
-#   # regression panel (the target-only Fig-3 analogue) — safe to run now:
 #   sbatch --export=ALL,MODE=regression,HOSPITAL=MIMIC-IV run_medrec.sbatch
-#   # one main-table search cell:
+#   sbatch --export=ALL,MODE=sweep,HOSPITAL=source_1 run_medrec.sbatch
+#   sbatch --export=ALL,MODE=prior run_medrec.sbatch
 #   sbatch --export=ALL,MODE=search,METHOD=mas,SEED=123,HOSPITAL=MIMIC-IV run_medrec.sbatch
 # =============================================================================
 set -euo pipefail
@@ -74,10 +87,56 @@ cd /home/lideyi/MAS-NAS
 
 # Supernet is task-agnostic (MLM) and lives under the canonical root; read-only.
 CKPT=$CANON_ROOT/${HOSPITAL}/checkpoint_mlm/mlm_model.pt
-[[ -f "$CKPT" ]] || { echo "FATAL: supernet ckpt missing: $CKPT"; exit 1; }
+
+# -----------------------------------------------------------------------------
+if [[ "$MODE" == "sweep" ]]; then
+    # Build med_rec NAS metadata for ONE hospital. run_pipeline resolves the
+    # supernet via get_checkpoint_dir() = results/<H>/checkpoint_mlm/ and REUSES
+    # it if present (returns before pretraining). We assert it exists so a
+    # missing ckpt can never trigger a fresh pretrain that would WRITE into
+    # results/<H>/checkpoint_mlm/. Metadata + dataset_summary go to results_medrec.
+    [[ -f "$CKPT" ]] || { echo "FATAL: supernet ckpt missing ($CKPT) — refusing to run sweep (would pretrain into results/)."; exit 1; }
+
+    python dataset_summary.py --hospital "$HOSPITAL" --output_dir "$MEDREC_ROOT"
+
+    python run_pipeline.py \
+        --hospital "$HOSPITAL" --tasks "$TASK" \
+        --seed 123 --batch_size 64 \
+        --pretrain_epochs 100 --pretrain_patience 5 \
+        --finetune_epochs 30 --finetune_patience 5 --top_k 3 \
+        --lr 2e-4 --weight_decay 1e-2 --max_grad_norm 1.0 \
+        --embed_dim 256 --depth 8 --num_heads 8 --mlp_ratio 8 \
+        --drop_rate 0.1 --attn_drop_rate 0.1 --drop_path_rate 0.1 \
+        --num_archs 100 --flops_seq_len 512 \
+        --output_dir "$MEDREC_ROOT" \
+        --num_workers 4 --cudnn_benchmark
+    date; echo "DONE sweep: hospital=$HOSPITAL task=$TASK -> $MEDREC_ROOT/$HOSPITAL/metadata.csv"
+    exit 0
+fi
+
+# -----------------------------------------------------------------------------
+if [[ "$MODE" == "prior" ]]; then
+    # Pool the swept med_rec metadata into the Layer-2 prior. CPU-only, run once.
+    # Default pool = the 7 source sites (targets source_15 / MIMIC-IV excluded so
+    # no target contributes to a prior it later consumes). Confirm this matches
+    # the 5-task prior's pool before trusting the comparison.
+    HOSPITALS=${HOSPITALS:-source_1 source_3 source_4 source_10 source_11 source_14 source_16}
+    echo "prior pool HOSPITALS=$HOSPITALS"
+
+    python shap_analysis.py \
+        --results_dir "$MEDREC_ROOT" \
+        --hospitals $HOSPITALS
+
+    python run_meta_regression.py \
+        --results_dir "$MEDREC_ROOT" \
+        --tasks "$TASK"
+    date; echo "DONE prior: pool=[$HOSPITALS] -> $MEDREC_ROOT/meta_regression/$TASK/architecture_prior.json"
+    exit 0
+fi
 
 # -----------------------------------------------------------------------------
 if [[ "$MODE" == "regression" ]]; then
+    [[ -f "$CKPT" ]] || { echo "FATAL: supernet ckpt missing: $CKPT"; exit 1; }
     # Target-only supernet-vs-scratch panel; writes results_medrec/<H>/regression/med_rec/
     python run_regression.py \
         --hospital "$HOSPITAL" --task "$TASK" \
@@ -97,6 +156,7 @@ fi
 
 # -----------------------------------------------------------------------------
 # MODE=search — mirror run_baseline.sbatch, but TASK and roots are locked above.
+[[ -f "$CKPT" ]] || { echo "FATAL: supernet ckpt missing: $CKPT"; exit 1; }
 METHOD=${METHOD:?set METHOD for MODE=search}
 BUDGET=${BUDGET:-30}
 RESULTS_DIR=$MEDREC_ROOT/seed_${SEED}
