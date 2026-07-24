@@ -72,6 +72,11 @@ def parse_args():
                          "next_diag_6m_pheno, next_diag_12m_pheno."))
     p.add_argument("--num_archs", type=int, default=10,
                    help="Number of random architectures to sample for finetuning")
+    p.add_argument("--finetune_subsample", type=int, default=None,
+                   help="Cap train/val/test to this many rows (fixed-seed) during "
+                        "metadata generation. Use on the large med_rec splits so a "
+                        "sweep fits the wall clock; arch ranking is preserved (same "
+                        "rows for every arch). Default: no cap.")
     p.add_argument("--pretrain_patience", type=int, default=5,
                    help="Pretrain early stopping patience (epochs without val MLM loss improvement)")
     p.add_argument("--finetune_patience", type=int, default=5,
@@ -535,6 +540,25 @@ def finetune_and_evaluate(args, tokenizer, ckpt_path, device):
 
         # Load the right split for this task.
         train_data, val_data, test_data = _load_task_split(args, task)
+
+        # Optional subsample of train/val/test for metadata generation. Each epoch
+        # evaluates BOTH val and test, so on the large med_rec splits (~150-200k
+        # eligible visits vs ~20k for the other tasks) a full sweep is ~10x slower
+        # and blows the wall clock. A FIXED-seed subsample makes every arch train
+        # and be ranked on the SAME rows, so the arch ranking the prior learns from
+        # is unchanged; only the absolute metric shifts slightly (absorbed by the
+        # meta-regression's per-hospital random intercept). Caps to a scale
+        # comparable to the other tasks' finetune sets.
+        if args.finetune_subsample:
+            n = args.finetune_subsample
+            if len(train_data) > n:
+                train_data = train_data.sample(n=n, random_state=args.seed).reset_index(drop=True)
+            if len(val_data) > n:
+                val_data = val_data.sample(n=n, random_state=args.seed + 1).reset_index(drop=True)
+            if len(test_data) > n:
+                test_data = test_data.sample(n=n, random_state=args.seed + 2).reset_index(drop=True)
+            print(f"  [subsample] train/val/test capped to {n} rows "
+                  f"→ {len(train_data)}/{len(val_data)}/{len(test_data)}")
 
         # Compute label entropy + positive-class ratio for this task.
         label_entropy = _label_entropy_for_task(train_data, task)

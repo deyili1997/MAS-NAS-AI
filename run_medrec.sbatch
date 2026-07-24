@@ -99,6 +99,10 @@ if [[ "$MODE" == "sweep" ]]; then
 
     python dataset_summary.py --hospital "$HOSPITAL" --output_dir "$MEDREC_ROOT"
 
+    # med_rec's eligible-visit splits are ~150-200k rows (vs ~20k for the other
+    # tasks); each epoch evaluates val AND test, so a full 100-arch sweep blows
+    # the wall clock. Cap to FT_SUBSAMPLE (default 20k, ~the other tasks' scale)
+    # with a fixed seed → every arch is ranked on the same rows, prior unchanged.
     python run_pipeline.py \
         --hospital "$HOSPITAL" --tasks "$TASK" \
         --seed 123 --batch_size 64 \
@@ -108,6 +112,7 @@ if [[ "$MODE" == "sweep" ]]; then
         --embed_dim 256 --depth 8 --num_heads 8 --mlp_ratio 8 \
         --drop_rate 0.1 --attn_drop_rate 0.1 --drop_path_rate 0.1 \
         --num_archs 100 --flops_seq_len 512 \
+        --finetune_subsample ${FT_SUBSAMPLE:-20000} \
         --output_dir "$MEDREC_ROOT" \
         --num_workers 4 --cudnn_benchmark
     date; echo "DONE sweep: hospital=$HOSPITAL task=$TASK -> $MEDREC_ROOT/$HOSPITAL/metadata.csv"
