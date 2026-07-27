@@ -5,6 +5,8 @@
 **Target venue**: NeurIPS / Nature Machine Intelligence / TPAMI
 **Stack**: PyTorch · AutoFormer supernet · Anthropic Claude API · XGBoost + SHAP · statsmodels MixedLM · SLURM on HiPerGator (UF) L4 GPUs
 
+![Study workflow](assets/study_workflow.jpg)
+
 ---
 
 ## TL;DR
