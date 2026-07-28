@@ -85,12 +85,17 @@ def _bestcsv_lookup(results_root: Path, hospital: str) -> dict:
 
 
 def main():
+    global TASK_ORDER   # so --tasks can override
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--results_root", required=True, type=Path)
     ap.add_argument("--anytime_dir", required=True, type=Path)
     ap.add_argument("--hospitals", required=True, nargs="+")
     ap.add_argument("--out_dir", required=True, type=Path)
+    ap.add_argument("--tasks", type=str, nargs="+", default=TASK_ORDER,
+                    help="Tasks to include (default: the main 5). Use --tasks "
+                         "med_rec with --results_root results_medrec.")
     args = ap.parse_args()
+    TASK_ORDER = args.tasks
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
     sel = pd.read_csv(args.anytime_dir / "anytime_selection_map.csv")

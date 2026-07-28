@@ -75,8 +75,8 @@ if compgen -G "$MEDREC/seed_*" > /dev/null; then
     python analyze/plot_loto_ablation.py     --results_root "$MEDREC" --hospitals "$H" --tasks med_rec --out_dir "$OUT/med_rec"
   done
   if [[ -f "$MEDREC/anytime/anytime_selection_map.csv" ]]; then
-    python analyze/build_anytime_table.py        --results_root "$MEDREC" --anytime_dir "$MEDREC/anytime" --hospitals $HOSPITALS --out_dir "$OUT/med_rec"
-    python analyze/build_anytime_significance.py  --results_root "$MEDREC" --anytime_dir "$MEDREC/anytime" --hospitals $HOSPITALS --out_dir "$OUT/med_rec"
+    python analyze/build_anytime_table.py        --results_root "$MEDREC" --anytime_dir "$MEDREC/anytime" --hospitals $HOSPITALS --tasks med_rec --out_dir "$OUT/med_rec"
+    python analyze/build_anytime_significance.py  --results_root "$MEDREC" --anytime_dir "$MEDREC/anytime" --hospitals $HOSPITALS --tasks med_rec --out_dir "$OUT/med_rec"
   else
     echo "  (med_rec anytime skipped — run extract_anytime_jobs + submit_retest_medrec + build_anytime_table first)"
   fi
