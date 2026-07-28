@@ -214,8 +214,6 @@ def main():
         max_iter_global = max(len(df) for df in records.values())
 
         fig, axes = panel_grid(len(TASKS))
-        if len(TASKS) == 1:
-            axes = [axes]
 
         for panel_i, (ax, task) in enumerate(zip(axes, TASKS)):
             panel_label(ax, panel_i)
