@@ -225,7 +225,7 @@ def main():
     # (figure2_pareto_<hospital>.png) so cross-hospital runs don't overwrite.
     for hospital in args.hospitals:
         print(f"=== Hospital: {hospital}")
-        print(f"  reading from {results_root}/seed_*/{hospital}/search/...")
+        print(f"  reading from {len(results_roots)} root(s)/seed_*/{hospital}/search/...")
         records = load_search_records(results_roots, hospital)
         print(f"  loaded {len(records)} (method, task, seed) records")
 

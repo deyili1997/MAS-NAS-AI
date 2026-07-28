@@ -224,7 +224,7 @@ def main():
     # don't overwrite.
     for hospital in args.hospitals:
         print(f"=== Hospital: {hospital}")
-        print(f"  reading from {results_root}/seed_*/{hospital}/search/...")
+        print(f"  reading from {len(results_roots)} root(s)/seed_*/{hospital}/search/...")
         all_scores = load_best_scores(results_roots, hospital)
         print(f"  loaded {len(all_scores)} (method, task) groups")
 
