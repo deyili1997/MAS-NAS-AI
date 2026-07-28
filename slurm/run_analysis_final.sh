@@ -61,6 +61,29 @@ else
   echo "⚠️  Table II SKIPPED — $ANYTIME/retest not found (needs GPU re-test; or carry over the archived main_table_anytime_*.csv)."
 fi
 
+# ── med_rec (drug recommendation) — isolated in results_medrec, run through the
+# SAME scripts with --tasks med_rec, output to OUT/med_rec so it sits parallel to
+# the 5-task results. Skipped cleanly if the med_rec search hasn't run yet.
+MEDREC=$PROJECT/results_medrec
+if compgen -G "$MEDREC/seed_*" > /dev/null; then
+  echo "── med_rec: full analysis (parallel to the 5 tasks) → $OUT/med_rec"
+  mkdir -p "$OUT/med_rec"
+  for H in $HOSPITALS; do
+    python analyze/aggregate_results.py     --results_root "$MEDREC" --hospitals "$H" --tasks med_rec --out_dir "$OUT/med_rec" --mas_budget 20 --baseline_budget 30
+    python analyze/plot_search_trajectory.py --results_root "$MEDREC" --hospitals "$H" --tasks med_rec --out_dir "$OUT/med_rec"
+    python analyze/plot_pareto.py            --results_root "$MEDREC" --hospitals "$H" --tasks med_rec --out_dir "$OUT/med_rec"
+    python analyze/plot_loto_ablation.py     --results_root "$MEDREC" --hospitals "$H" --tasks med_rec --out_dir "$OUT/med_rec"
+  done
+  if [[ -f "$MEDREC/anytime/anytime_selection_map.csv" ]]; then
+    python analyze/build_anytime_table.py        --results_root "$MEDREC" --anytime_dir "$MEDREC/anytime" --hospitals $HOSPITALS --out_dir "$OUT/med_rec"
+    python analyze/build_anytime_significance.py  --results_root "$MEDREC" --anytime_dir "$MEDREC/anytime" --hospitals $HOSPITALS --out_dir "$OUT/med_rec"
+  else
+    echo "  (med_rec anytime skipped — run extract_anytime_jobs + submit_retest_medrec + build_anytime_table first)"
+  fi
+else
+  echo "── med_rec: no search results under $MEDREC — skipped"
+fi
+
 # ── Fig 3: carry over the archived 256 PNG (raw data overwritten by the 1008 retrain)
 echo "⚠️  Fig 3 NOT regenerated — copy the archived 256 version into $OUT:"
 echo "     Results/256_version/2026-06-26/figure3_regression_combined.png"
