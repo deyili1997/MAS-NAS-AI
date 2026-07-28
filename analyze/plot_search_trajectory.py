@@ -172,6 +172,7 @@ def plot_trajectory_panel(ax, records: dict, task: str, metric: str, max_iter_gl
 
 
 def main():
+    global TASKS   # so --tasks can override the module default
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--results_root", type=str, default="./results",
                    help="Root containing seed_<N>/ subdirectories.")
@@ -183,7 +184,11 @@ def main():
     p.add_argument("--metric", type=str, default="val_auprc",
                    choices=["val_auprc", "val_auroc", "val_f1", "val_accuracy"],
                    help="Metric to track (Y-axis).")
+    p.add_argument("--tasks", type=str, nargs="+", default=TASKS,
+                   help="Tasks to plot (default: the main 5). Use --tasks "
+                        "med_rec with --results_root results_medrec.")
     args = p.parse_args()
+    TASKS = args.tasks
 
     results_root = Path(args.results_root).resolve()
     out_dir = Path(args.out_dir).resolve()

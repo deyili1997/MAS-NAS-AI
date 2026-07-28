@@ -828,6 +828,7 @@ def build_significance_table(
 # Entry
 # ---------------------------------------------------------------------------
 def main():
+    global TASKS   # so --tasks can override the module default
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--results_root", type=str, default="./results",
                    help="Root containing seed_<N>/ subdirectories (or single seed root).")
@@ -841,7 +842,12 @@ def main():
                    help="MAS-NAS budget cutoff for efficiency table (default: 30).")
     p.add_argument("--baseline_budget", type=int, default=100,
                    help="Baseline budget cutoff for efficiency table (default: 100).")
+    p.add_argument("--tasks", type=str, nargs="+", default=TASKS,
+                   help=f"Tasks to aggregate (default: {TASKS}). Use e.g. "
+                        "--tasks med_rec with --results_root results_medrec to "
+                        "aggregate an isolated task in parallel with the main 5.")
     args = p.parse_args()
+    TASKS = args.tasks
 
     results_root = Path(args.results_root).resolve()
     out_dir = Path(args.out_dir).resolve()

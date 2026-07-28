@@ -72,15 +72,20 @@ def best_arch_in_prefix(df: pd.DataFrame, cutoff: int) -> dict | None:
 
 
 def main():
+    global TASKS   # so --tasks can override the module default
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--results_root", required=True, type=Path)
     ap.add_argument("--hospitals", required=True, nargs="+")
     ap.add_argument("--out_dir", required=True, type=Path)
+    ap.add_argument("--tasks", type=str, nargs="+", default=TASKS,
+                    help=f"Tasks to process (default: {TASKS}). Use --tasks med_rec "
+                         "with --results_root results_medrec for the isolated task.")
     ap.add_argument("--skip_existing_dir", type=Path, default=None,
                     help="Directory of completed retest JSONs. Archs already "
                          "evaluated there are excluded from the rerun list (their "
                          "test value is reused at table-build time).")
     args = ap.parse_args()
+    TASKS = args.tasks
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     selection_rows = []

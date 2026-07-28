@@ -196,6 +196,7 @@ def plot_panel(ax, all_scores: dict, task: str):
 # Entry
 # ---------------------------------------------------------------------------
 def main():
+    global TASKS   # so --tasks can override the module default
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--results_root", type=str, default="./results",
                    help="Root containing seed_<N>/ subdirectories.")
@@ -204,7 +205,11 @@ def main():
                         "Each hospital produces its own PNG with _<hospital> suffix.")
     p.add_argument("--out_dir", type=str, default="./analyze",
                    help="Output directory for the figure.")
+    p.add_argument("--tasks", type=str, nargs="+", default=TASKS,
+                   help="Tasks to plot (default: the main 5). Use --tasks "
+                        "med_rec with --results_root results_medrec.")
     args = p.parse_args()
+    TASKS = args.tasks
 
     results_root = Path(args.results_root).resolve()
     out_dir = Path(args.out_dir).resolve()
