@@ -27,8 +27,20 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter, LogLocator
 import numpy as np
 import pandas as pd
+
+
+def _human_params(x, _pos=None):
+    """Log-axis tick label as a human-readable count: 5e5→'0.5M', 3e6→'3M'."""
+    if x <= 0:
+        return ""
+    if x >= 1e6:
+        return f"{x / 1e6:g}M"
+    if x >= 1e3:
+        return f"{x / 1e3:g}K"
+    return f"{x:g}"
 
 # Repo root on sys.path: this file is executed as `python analyze/<script>.py`,
 # so sys.path[0] is analyze/ and `utils` is not importable without this.
@@ -190,10 +202,18 @@ def plot_pareto_panel(ax, records: dict, task: str):
                 zorder=15,
             )
 
-    ax.set_xlabel("# parameters", fontsize=10)
+    ax.set_xlabel("# parameters (log scale)", fontsize=10)
     ax.set_ylabel("Val AUPRC", fontsize=10)
     ax.set_title(TASK_DISPLAY[task], fontsize=11)
     ax.set_xscale("log")
+    # Human-readable ticks (0.5M, 1M, 3M, ...) on both decade and mid-decade
+    # positions so a narrow ~1–2 decade range still gets several labels.
+    ax.xaxis.set_major_locator(LogLocator(base=10, numticks=12))
+    ax.xaxis.set_minor_locator(LogLocator(base=10, subs=(0.2, 0.3, 0.5, 0.7), numticks=12))
+    ax.xaxis.set_major_formatter(FuncFormatter(_human_params))
+    ax.xaxis.set_minor_formatter(FuncFormatter(_human_params))
+    ax.tick_params(axis="x", which="both", labelsize=7)
+    plt.setp(ax.get_xticklabels(which="both"), rotation=30, ha="right")
     ax.grid(True, alpha=0.25)
     ax.legend(loc="lower right", fontsize=7, framealpha=0.85, ncol=2)
 
