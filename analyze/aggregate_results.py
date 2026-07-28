@@ -87,7 +87,7 @@ TASK_DISPLAY = {
     "readmission": "Readmission (3M)",
     "next_diag_6m_pheno": "Phenotype (6M)",
     "next_diag_12m_pheno": "Phenotype (12M)",
-    "med_rec": "Drug Rec",
+    "med_rec": "Drug Recommendation",
 }
 
 METRICS = ["test_accuracy", "test_f1", "test_auroc", "test_auprc"]

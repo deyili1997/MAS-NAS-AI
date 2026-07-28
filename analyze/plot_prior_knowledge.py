@@ -48,7 +48,7 @@ TASK_ORDER = ["death", "stay", "readmission",
               "next_diag_6m_pheno", "next_diag_12m_pheno", "med_rec"]
 TASK_LABEL = {"death": "Mortality", "stay": "Stay > 7d", "readmission": "Readmission (3M)",
               "next_diag_6m_pheno": "Phenotype (6M)", "next_diag_12m_pheno": "Phenotype (12M)",
-              "med_rec": "Drug Rec"}
+              "med_rec": "Drug Recommendation"}
 POS = "#2E8B57"    # sea green — CI entirely > 0 (preferred)
 NEG = "#DC143C"    # crimson   — CI entirely < 0 (discouraged)
 NEU = "#9E9E9E"    # grey      — CI spans 0 (inconclusive)

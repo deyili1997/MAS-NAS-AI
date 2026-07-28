@@ -69,15 +69,15 @@ TASK_DISPLAY = {
     "readmission": "Readmission (3M)",
     "next_diag_6m_pheno": "Phenotype (6M)",
     "next_diag_12m_pheno": "Phenotype (12M)",
-    "med_rec": "Drug Rec",
+    "med_rec": "Drug Recommendation",
 }
 
 
-def load_search_records(results_root: Path, hospital: str) -> dict:
+def load_search_records(results_roots, hospital: str) -> dict:
     """Walk results/seed_*/<hospital>/search/<method>/<task>/*_search.csv.
     Returns dict: (method, task, seed) -> sorted-by-iteration DataFrame."""
     records: dict = {}
-    seed_dirs = sorted(results_root.glob("seed_*"))
+    seed_dirs = [d for root in results_roots for d in sorted(Path(root).glob("seed_*"))]
 
     for seed_dir in seed_dirs:
         try:
@@ -175,7 +175,7 @@ def plot_trajectory_panel(ax, records: dict, task: str, metric: str, max_iter_gl
 def main():
     global TASKS   # so --tasks can override the module default
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--results_root", type=str, default="./results",
+    p.add_argument("--results_root", type=str, nargs="+", default=["./results"],
                    help="Root containing seed_<N>/ subdirectories.")
     p.add_argument("--hospitals", type=str, nargs="+", required=True,
                    help="One or more hospital names (e.g. MIMIC-III MIMIC-IV). "
@@ -191,7 +191,7 @@ def main():
     args = p.parse_args()
     TASKS = args.tasks
 
-    results_root = Path(args.results_root).resolve()
+    results_roots = [Path(r).resolve() for r in args.results_root]
     out_dir = Path(args.out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -204,7 +204,7 @@ def main():
     for hospital in args.hospitals:
         print(f"=== Hospital: {hospital}")
         print(f"  reading from {results_root}/seed_*/{hospital}/search/...")
-        records = load_search_records(results_root, hospital)
+        records = load_search_records(results_roots, hospital)
         print(f"  loaded {len(records)} (method, task, seed) records")
 
         if not records:

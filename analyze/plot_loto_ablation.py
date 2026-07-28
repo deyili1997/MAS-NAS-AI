@@ -79,17 +79,17 @@ TASK_DISPLAY = {
     "readmission": "Readmission (3M)",
     "next_diag_6m_pheno": "Phenotype (6M)",
     "next_diag_12m_pheno": "Phenotype (12M)",
-    "med_rec": "Drug Rec",
+    "med_rec": "Drug Recommendation",
 }
 
 
 # ---------------------------------------------------------------------------
 # Data loading — walks results/seed_*/<hospital>/search/<method>/<task>/<method>_best.csv
 # ---------------------------------------------------------------------------
-def load_best_scores(results_root: Path, hospital: str) -> dict:
+def load_best_scores(results_roots, hospital: str) -> dict:
     """Returns {(method, task): {seed: test_auprc, ...}}."""
     out: dict = {}
-    for seed_dir in sorted(results_root.glob("seed_*")):
+    for seed_dir in [d for root in results_roots for d in sorted(Path(root).glob("seed_*"))]:
         try:
             seed = int(seed_dir.name.split("_", 1)[1])
         except (IndexError, ValueError):
@@ -199,7 +199,7 @@ def plot_panel(ax, all_scores: dict, task: str):
 def main():
     global TASKS   # so --tasks can override the module default
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--results_root", type=str, default="./results",
+    p.add_argument("--results_root", type=str, nargs="+", default=["./results"],
                    help="Root containing seed_<N>/ subdirectories.")
     p.add_argument("--hospitals", type=str, nargs="+", required=True,
                    help="One or more hospital names (e.g. MIMIC-III MIMIC-IV). "
@@ -212,7 +212,7 @@ def main():
     args = p.parse_args()
     TASKS = args.tasks
 
-    results_root = Path(args.results_root).resolve()
+    results_roots = [Path(r).resolve() for r in args.results_root]
     out_dir = Path(args.out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -225,7 +225,7 @@ def main():
     for hospital in args.hospitals:
         print(f"=== Hospital: {hospital}")
         print(f"  reading from {results_root}/seed_*/{hospital}/search/...")
-        all_scores = load_best_scores(results_root, hospital)
+        all_scores = load_best_scores(results_roots, hospital)
         print(f"  loaded {len(all_scores)} (method, task) groups")
 
         if not all_scores:

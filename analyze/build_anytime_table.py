@@ -34,7 +34,7 @@ METHOD_ORDER = ["baseline0", "baseline1", "baseline2", "baseline4", "mas"]
 TASK_DISPLAY = {
     "death": "Death", "stay": "Stay>7d", "readmission": "Readmission (3M)",
     "next_diag_6m_pheno": "Phenotype (6M)", "next_diag_12m_pheno": "Phenotype (12M)",
-    "med_rec": "Drug Rec",
+    "med_rec": "Drug Recommendation",
 }
 TASK_ORDER = ["death", "stay", "readmission", "next_diag_6m_pheno", "next_diag_12m_pheno"]
 ARCH_COLS = ["embed_dim", "depth", "mlp_ratio", "num_heads"]

@@ -16,7 +16,11 @@
 set -uo pipefail   # NOT -e: one failure shouldn't kill the whole run
 
 PROJECT=/blue/mei.liu/lideyi/MAS-NAS
-RESULTS=$PROJECT/results                             # 256-grid seed_* live HERE
+RESULTS=$PROJECT/results                             # 256-grid seed_* live HERE (5 tasks)
+MEDREC=$PROJECT/results_medrec                       # isolated drug-recommendation search
+# All six tasks, in panel order. The figures read BOTH roots so drug rec appears
+# as a 6th panel alongside the 5 tasks.
+ALLTASKS="death stay readmission next_diag_6m_pheno next_diag_12m_pheno med_rec"
 # Output folder date tag. Defaults to today; override to consolidate into an
 # existing final folder, e.g. FINAL_DATE=2026-07-15 bash slurm/run_analysis_final.sh
 OUT=$PROJECT/analyze/${FINAL_DATE:-$(date +%Y-%m-%d)}_final
@@ -34,13 +38,16 @@ if ! compgen -G "$RESULTS/seed_*" > /dev/null; then
 fi
 echo "Seeds: $(ls -d "$RESULTS"/seed_* 2>/dev/null | xargs -n1 basename | tr '\n' ' ')"
 
-# ── Tables (Table I, supp, arch, cost, significance, LOTO) + per-hospital figures
+# ── Tables (5-task, from results/) + 6-task figures (results/ + results_medrec/)
+# Figures read BOTH roots and all six tasks so drug rec is a 6th panel. The
+# med_rec-only tables come from the dedicated med_rec pass below.
+MEDREC_ROOT_ARG=""; compgen -G "$MEDREC/seed_*" > /dev/null && MEDREC_ROOT_ARG="$MEDREC"
 for H in $HOSPITALS; do
-  echo "── $H: tables + Fig 1/2/5"
+  echo "── $H: tables (5-task) + Fig 1/2/5 (6-task incl. drug rec)"
   python analyze/aggregate_results.py   --results_root "$RESULTS" --hospitals "$H" --out_dir "$OUT" --mas_budget 20 --baseline_budget 30
-  python analyze/plot_search_trajectory.py --results_root "$RESULTS" --hospitals "$H" --out_dir "$OUT"
-  python analyze/plot_pareto.py            --results_root "$RESULTS" --hospitals "$H" --out_dir "$OUT"
-  python analyze/plot_loto_ablation.py     --results_root "$RESULTS" --hospitals "$H" --out_dir "$OUT"
+  python analyze/plot_search_trajectory.py --results_root "$RESULTS" $MEDREC_ROOT_ARG --hospitals "$H" --tasks $ALLTASKS --out_dir "$OUT"
+  python analyze/plot_pareto.py            --results_root "$RESULTS" $MEDREC_ROOT_ARG --hospitals "$H" --tasks $ALLTASKS --out_dir "$OUT"
+  python analyze/plot_loto_ablation.py     --results_root "$RESULTS" $MEDREC_ROOT_ARG --hospitals "$H" --tasks $ALLTASKS --out_dir "$OUT"
 done
 
 # ── Prior-knowledge forest plots (Layer-2 prior; replaces the old retrieval figure)
@@ -64,17 +71,15 @@ else
 fi
 
 # ── med_rec (drug recommendation) — isolated in results_medrec, run through the
-# SAME scripts with --tasks med_rec, output to OUT/med_rec so it sits parallel to
-# the 5-task results. Skipped cleanly if the med_rec search hasn't run yet.
-MEDREC=$PROJECT/results_medrec
+# SAME aggregate scripts with --tasks med_rec, output to OUT/med_rec — the
+# med_rec-only TABLES (main/supp/arch/cost/sig/loto + anytime). Figures are NOT
+# regenerated here: the main Fig 1/2/5 above already include drug rec as a 6th
+# panel (they read both roots). Skipped cleanly if the med_rec search is absent.
 if compgen -G "$MEDREC/seed_*" > /dev/null; then
-  echo "── med_rec: full analysis (parallel to the 5 tasks) → $OUT/med_rec"
+  echo "── med_rec: tables → $OUT/med_rec"
   mkdir -p "$OUT/med_rec"
   for H in $HOSPITALS; do
     python analyze/aggregate_results.py     --results_root "$MEDREC" --hospitals "$H" --tasks med_rec --out_dir "$OUT/med_rec" --mas_budget 20 --baseline_budget 30
-    python analyze/plot_search_trajectory.py --results_root "$MEDREC" --hospitals "$H" --tasks med_rec --out_dir "$OUT/med_rec"
-    python analyze/plot_pareto.py            --results_root "$MEDREC" --hospitals "$H" --tasks med_rec --out_dir "$OUT/med_rec"
-    python analyze/plot_loto_ablation.py     --results_root "$MEDREC" --hospitals "$H" --tasks med_rec --out_dir "$OUT/med_rec"
   done
   if [[ -f "$MEDREC/anytime/anytime_selection_map.csv" ]]; then
     python analyze/build_anytime_table.py        --results_root "$MEDREC" --anytime_dir "$MEDREC/anytime" --hospitals $HOSPITALS --tasks med_rec --out_dir "$OUT/med_rec"
