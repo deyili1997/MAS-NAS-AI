@@ -17,7 +17,9 @@ set -uo pipefail   # NOT -e: one failure shouldn't kill the whole run
 
 PROJECT=/blue/mei.liu/lideyi/MAS-NAS
 RESULTS=$PROJECT/results                             # 256-grid seed_* live HERE
-OUT=$PROJECT/analyze/$(date +%Y-%m-%d)_final
+# Output folder date tag. Defaults to today; override to consolidate into an
+# existing final folder, e.g. FINAL_DATE=2026-07-15 bash slurm/run_analysis_final.sh
+OUT=$PROJECT/analyze/${FINAL_DATE:-$(date +%Y-%m-%d)}_final
 ANYTIME=${ANYTIME_DIR:-$PROJECT/analyze/anytime}
 HOSPITALS="source_15 MIMIC-IV"
 # Layer-2 prior forest plots: 5 tasks from the 256 backup + med_rec (skipped if absent).
