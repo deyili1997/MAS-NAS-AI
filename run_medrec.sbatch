@@ -5,7 +5,9 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem-per-cpu=16gb
+# 12gb x 4 = 48GB/job. med_rec splits are larger (~150-200k rows) and MODE=
+# regression trains from scratch, so keep more headroom than run_baseline (32G).
+#SBATCH --mem-per-cpu=12gb
 #SBATCH --partition=hpg-turin
 #SBATCH --gres=gpu:l4:1
 # 168h covers MODE=regression (k=150 from-scratch pretrains); MODE=search

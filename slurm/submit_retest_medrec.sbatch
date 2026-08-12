@@ -3,7 +3,9 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem-per-cpu=12gb
+# 10gb x 4 = 40GB/job. Single-arch finetune, but med_rec splits are larger
+# (~150-200k rows), so keep a little more headroom than the 5-task retest (32G).
+#SBATCH --mem-per-cpu=10gb
 #SBATCH --partition=hpg-turin
 #SBATCH --gres=gpu:l4:1
 #SBATCH --time=08:00:00

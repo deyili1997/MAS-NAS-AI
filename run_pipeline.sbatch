@@ -5,7 +5,9 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem-per-cpu=16gb
+# 12gb x 4 = 48GB/job. Pretrain (MLM) is the heaviest stage; finetune peaks
+# well under 40GB, so 48GB leaves headroom while easing the QOS group mem quota.
+#SBATCH --mem-per-cpu=12gb
 #SBATCH --partition=hpg-turin
 #SBATCH --gres=gpu:l4:1
 #SBATCH --time=14-00:00:00

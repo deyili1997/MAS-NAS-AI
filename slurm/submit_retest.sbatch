@@ -13,7 +13,9 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem-per-cpu=12gb
+# 8gb x 4 = 32GB/job. Re-test is a single-arch finetune (lighter than search);
+# with a %20 array this materially eases the QOS group mem quota.
+#SBATCH --mem-per-cpu=8gb
 #SBATCH --partition=hpg-turin
 #SBATCH --gres=gpu:l4:1
 #SBATCH --time=04:00:00
