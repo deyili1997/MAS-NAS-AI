@@ -70,7 +70,11 @@ CONDITION_DISPLAY = {
     "mas_cold":        "ATHENA\n(cold)",
 }
 
-LLM_BASELINE_METHODS = ["baseline4"]  # baseline3 (LLMatic) excluded
+# LLM-based baselines eligible as the "Best baseline" bar. LLM_BASELINE_METHODS
+# is the ACTIVE subset (re-derived from --methods in main() as POOL ∩ methods),
+# so LLMatic joins automatically whenever baseline3 is included.
+LLM_BASELINE_POOL = ["baseline3", "baseline4"]  # LLMatic, CoLLM-NAS
+LLM_BASELINE_METHODS = ["baseline4"]  # default active subset (baseline3 excluded)
 
 TASKS = ["death", "stay", "readmission", "next_diag_6m_pheno", "next_diag_12m_pheno"]
 TASK_DISPLAY = {
@@ -197,7 +201,7 @@ def plot_panel(ax, all_scores: dict, task: str):
 # Entry
 # ---------------------------------------------------------------------------
 def main():
-    global TASKS   # so --tasks can override the module default
+    global TASKS, LLM_BASELINE_METHODS   # --tasks / --methods override module defaults
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--results_root", type=str, nargs="+", default=["./results"],
                    help="Root containing seed_<N>/ subdirectories.")
@@ -209,8 +213,16 @@ def main():
     p.add_argument("--tasks", type=str, nargs="+", default=TASKS,
                    help="Tasks to plot (default: the main 5). Use --tasks "
                         "med_rec with --results_root results_medrec.")
+    p.add_argument("--methods", type=str, nargs="+", default=None,
+                   help="Active competitor set. Only affects which LLM baseline "
+                        "(LLMatic vs CoLLM-NAS) can fill the 'Best baseline' bar: "
+                        "the pool is intersected with this list. Pass a set that "
+                        "includes baseline3 to let LLMatic compete.")
     args = p.parse_args()
     TASKS = args.tasks
+    if args.methods is not None:
+        LLM_BASELINE_METHODS = [m for m in LLM_BASELINE_POOL if m in args.methods] or ["baseline4"]
+    print(f"[Fig 5] best-baseline pool={LLM_BASELINE_METHODS}")
 
     results_roots = [Path(r).resolve() for r in args.results_root]
     out_dir = Path(args.out_dir).resolve()

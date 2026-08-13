@@ -36,7 +36,7 @@ from utils.panel_labels import panel_label  # noqa: E402
 from utils.fig_layout import panel_grid  # noqa: E402
 
 
-METHODS = ["baseline0", "baseline1", "baseline2", "baseline4", "mas"]  # baseline3 (LLMatic) excluded
+METHODS = ["baseline0", "baseline1", "baseline2", "baseline4", "mas"]  # baseline3 (LLMatic) excluded by DEFAULT — override with --methods
 METHOD_DISPLAY = {
     "baseline0": "Random",
     "baseline1": "EA",
@@ -173,7 +173,7 @@ def plot_trajectory_panel(ax, records: dict, task: str, metric: str, max_iter_gl
 
 
 def main():
-    global TASKS   # so --tasks can override the module default
+    global TASKS, METHODS   # --tasks / --methods override the module defaults
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--results_root", type=str, nargs="+", default=["./results"],
                    help="Root containing seed_<N>/ subdirectories.")
@@ -188,8 +188,13 @@ def main():
     p.add_argument("--tasks", type=str, nargs="+", default=TASKS,
                    help="Tasks to plot (default: the main 5). Use --tasks "
                         "med_rec with --results_root results_medrec.")
+    p.add_argument("--methods", type=str, nargs="+", default=METHODS,
+                   help=f"Method curves to plot (default: {METHODS}; baseline3/"
+                        "LLMatic excluded). Pass e.g. --methods baseline0 baseline1 "
+                        "baseline2 baseline3 baseline4 mas to include LLMatic.")
     args = p.parse_args()
     TASKS = args.tasks
+    METHODS = args.methods
 
     results_roots = [Path(r).resolve() for r in args.results_root]
     out_dir = Path(args.out_dir).resolve()

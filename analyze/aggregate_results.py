@@ -50,7 +50,7 @@ import pandas as pd
 #   - inflating Table 1 with extra rows
 #   - polluting Wilcoxon (would compare MAS vs ablations as if "baselines")
 #   - skewing arch/cost audits
-MAIN_METHODS = ["baseline0", "baseline1", "baseline2", "baseline4", "mas"]  # baseline3 (LLMatic) excluded
+MAIN_METHODS = ["baseline0", "baseline1", "baseline2", "baseline4", "mas"]  # baseline3 (LLMatic) excluded by DEFAULT — override with --methods
 
 # Fig 5 robustness ablation only — these methods are extra MAS variants, not baselines.
 # Used exclusively by build_loto_ablation_table(). Layer factorial design:
@@ -75,10 +75,13 @@ METHOD_DISPLAY = {
     "mas_cold":        "ATHENA (cold)",
 }
 
-# Methods that compete with MAS as upper-bound LLM-based baselines.
-# `build_loto_ablation_table` automatically picks the best of these per task
-# to fill the "Best baseline" column in Fig 5's companion table.
-LLM_BASELINE_METHODS = ["baseline4"]  # baseline3 (LLMatic) excluded
+# LLM-based baselines eligible for the "Best baseline" column in Fig 5's
+# companion table. `LLM_BASELINE_METHODS` is the ACTIVE subset (recomputed from
+# --methods in main() as POOL ∩ MAIN_METHODS), so LLMatic joins automatically
+# whenever baseline3 is included. `build_loto_ablation_table` picks the best of
+# the active subset per task.
+LLM_BASELINE_POOL = ["baseline3", "baseline4"]  # LLMatic, CoLLM-NAS
+LLM_BASELINE_METHODS = ["baseline4"]  # default active subset (baseline3 excluded)
 
 TASKS = ["death", "stay", "readmission", "next_diag_6m_pheno", "next_diag_12m_pheno"]
 TASK_DISPLAY = {
@@ -829,7 +832,7 @@ def build_significance_table(
 # Entry
 # ---------------------------------------------------------------------------
 def main():
-    global TASKS   # so --tasks can override the module default
+    global TASKS, MAIN_METHODS, METHODS, LLM_BASELINE_METHODS  # --tasks / --methods override module defaults
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--results_root", type=str, default="./results",
                    help="Root containing seed_<N>/ subdirectories (or single seed root).")
@@ -847,8 +850,25 @@ def main():
                    help=f"Tasks to aggregate (default: {TASKS}). Use e.g. "
                         "--tasks med_rec with --results_root results_medrec to "
                         "aggregate an isolated task in parallel with the main 5.")
+    p.add_argument("--methods", type=str, nargs="+", default=MAIN_METHODS,
+                   help=f"Competitor methods for the tables (default: {MAIN_METHODS}; "
+                        "baseline3/LLMatic excluded). Pass e.g. --methods baseline0 "
+                        "baseline1 baseline2 baseline3 baseline4 mas to include LLMatic. "
+                        "'mas' is always kept; the ablation variants are always loaded.")
     args = p.parse_args()
     TASKS = args.tasks
+
+    # --methods overrides the competitor set. Always keep 'mas' (efficiency /
+    # significance tables are defined relative to it). METHODS (the disk-load
+    # filter) is the union with the ablation variants so those still load, and
+    # the "Best baseline" pool is re-derived so LLMatic joins when included.
+    MAIN_METHODS = list(args.methods)
+    if "mas" not in MAIN_METHODS:
+        MAIN_METHODS.append("mas")
+    METHODS = MAIN_METHODS + [m for m in ABLATION_METHODS if m not in MAIN_METHODS]
+    LLM_BASELINE_METHODS = [m for m in LLM_BASELINE_POOL if m in MAIN_METHODS] or ["baseline4"]
+    print(f"[Aggregate] methods={MAIN_METHODS}")
+    print(f"[Aggregate] LLM-baseline pool (best-baseline column)={LLM_BASELINE_METHODS}")
 
     results_root = Path(args.results_root).resolve()
     out_dir = Path(args.out_dir).resolve()

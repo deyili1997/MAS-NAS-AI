@@ -28,9 +28,9 @@ import pandas as pd
 
 METHOD_DISPLAY = {
     "baseline0": "Random", "baseline1": "EA", "baseline2": "GENIUS",
-    "baseline4": "CoLLM-NAS", "mas": "ATHENA",
+    "baseline3": "LLMatic", "baseline4": "CoLLM-NAS", "mas": "ATHENA",
 }
-METHOD_ORDER = ["baseline0", "baseline1", "baseline2", "baseline4", "mas"]
+METHOD_ORDER = ["baseline0", "baseline1", "baseline2", "baseline4", "mas"]  # baseline3 excluded by DEFAULT — override with --methods
 TASK_DISPLAY = {
     "death": "Death", "stay": "Stay>7d", "readmission": "Readmission (3M)",
     "next_diag_6m_pheno": "Phenotype (6M)", "next_diag_12m_pheno": "Phenotype (12M)",
@@ -85,7 +85,7 @@ def _bestcsv_lookup(results_root: Path, hospital: str) -> dict:
 
 
 def main():
-    global TASK_ORDER   # so --tasks can override
+    global TASK_ORDER, METHOD_ORDER   # so --tasks / --methods can override
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--results_root", required=True, type=Path)
     ap.add_argument("--anytime_dir", required=True, type=Path)
@@ -94,8 +94,13 @@ def main():
     ap.add_argument("--tasks", type=str, nargs="+", default=TASK_ORDER,
                     help="Tasks to include (default: the main 5). Use --tasks "
                          "med_rec with --results_root results_medrec.")
+    ap.add_argument("--methods", type=str, nargs="+", default=METHOD_ORDER,
+                    help=f"Method rows (default: {METHOD_ORDER}; baseline3/LLMatic "
+                         "excluded). Pass e.g. --methods baseline0 baseline1 baseline2 "
+                         "baseline3 baseline4 mas to include LLMatic.")
     args = ap.parse_args()
     TASK_ORDER = args.tasks
+    METHOD_ORDER = args.methods
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
     sel = pd.read_csv(args.anytime_dir / "anytime_selection_map.csv")

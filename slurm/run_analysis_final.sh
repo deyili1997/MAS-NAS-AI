@@ -21,6 +21,12 @@ MEDREC=$PROJECT/results_medrec                       # isolated drug-recommendat
 # All six tasks, in panel order. The figures read BOTH roots so drug rec appears
 # as a 6th panel alongside the 5 tasks.
 ALLTASKS="death stay readmission next_diag_6m_pheno next_diag_12m_pheno med_rec"
+# Competitor methods included in ALL figures + tables. baseline3 (LLMatic) is
+# EXCLUDED by default; the one knob to include it everywhere in a single run is:
+#   METHODS="baseline0 baseline1 baseline2 baseline3 baseline4 mas" bash slurm/run_analysis_final.sh
+# Keep canonical order and keep "mas". (The anytime tables are data-driven and
+# pick up baseline3 automatically once its anytime jobs exist.)
+METHODS=${METHODS:-"baseline0 baseline1 baseline2 baseline4 mas"}
 # Output folder date tag. Defaults to today; override to consolidate into an
 # existing final folder, e.g. FINAL_DATE=2026-07-15 bash slurm/run_analysis_final.sh
 OUT=$PROJECT/analyze/${FINAL_DATE:-$(date +%Y-%m-%d)}_final
@@ -43,11 +49,11 @@ echo "Seeds: $(ls -d "$RESULTS"/seed_* 2>/dev/null | xargs -n1 basename | tr '\n
 # med_rec-only tables come from the dedicated med_rec pass below.
 MEDREC_ROOT_ARG=""; compgen -G "$MEDREC/seed_*" > /dev/null && MEDREC_ROOT_ARG="$MEDREC"
 for H in $HOSPITALS; do
-  echo "── $H: tables (5-task) + Fig 1/2/5 (6-task incl. drug rec)"
-  python analyze/aggregate_results.py   --results_root "$RESULTS" --hospitals "$H" --out_dir "$OUT" --mas_budget 20 --baseline_budget 30
-  python analyze/plot_search_trajectory.py --results_root "$RESULTS" $MEDREC_ROOT_ARG --hospitals "$H" --tasks $ALLTASKS --out_dir "$OUT"
-  python analyze/plot_pareto.py            --results_root "$RESULTS" $MEDREC_ROOT_ARG --hospitals "$H" --tasks $ALLTASKS --out_dir "$OUT"
-  python analyze/plot_loto_ablation.py     --results_root "$RESULTS" $MEDREC_ROOT_ARG --hospitals "$H" --tasks $ALLTASKS --out_dir "$OUT"
+  echo "── $H: tables (5-task) + Fig 1/2/5 (6-task incl. drug rec)   methods=[$METHODS]"
+  python analyze/aggregate_results.py   --results_root "$RESULTS" --hospitals "$H" --out_dir "$OUT" --mas_budget 20 --baseline_budget 30 --methods $METHODS
+  python analyze/plot_search_trajectory.py --results_root "$RESULTS" $MEDREC_ROOT_ARG --hospitals "$H" --tasks $ALLTASKS --out_dir "$OUT" --methods $METHODS
+  python analyze/plot_pareto.py            --results_root "$RESULTS" $MEDREC_ROOT_ARG --hospitals "$H" --tasks $ALLTASKS --out_dir "$OUT" --methods $METHODS
+  python analyze/plot_loto_ablation.py     --results_root "$RESULTS" $MEDREC_ROOT_ARG --hospitals "$H" --tasks $ALLTASKS --out_dir "$OUT" --methods $METHODS
 done
 
 # ── Prior-knowledge forest plots (Layer-2 prior; replaces the old retrieval figure)
@@ -64,8 +70,8 @@ done
 # ── Table II: anytime 5/10/20/30 (needs the pre-existing GPU re-test outputs)
 if [[ -d "$ANYTIME/retest" ]]; then
   echo "── Table II: anytime (from $ANYTIME/retest)"
-  python analyze/build_anytime_table.py        --results_root "$RESULTS" --anytime_dir "$ANYTIME" --hospitals $HOSPITALS --out_dir "$OUT"
-  python analyze/build_anytime_significance.py  --results_root "$RESULTS" --anytime_dir "$ANYTIME" --hospitals $HOSPITALS --out_dir "$OUT"
+  python analyze/build_anytime_table.py        --results_root "$RESULTS" --anytime_dir "$ANYTIME" --hospitals $HOSPITALS --out_dir "$OUT" --methods $METHODS
+  python analyze/build_anytime_significance.py  --results_root "$RESULTS" --anytime_dir "$ANYTIME" --hospitals $HOSPITALS --out_dir "$OUT" --methods $METHODS
 else
   echo "⚠️  Table II SKIPPED — $ANYTIME/retest not found (needs GPU re-test; or carry over the archived main_table_anytime_*.csv)."
 fi
@@ -79,11 +85,11 @@ if compgen -G "$MEDREC/seed_*" > /dev/null; then
   echo "── med_rec: tables → $OUT/med_rec"
   mkdir -p "$OUT/med_rec"
   for H in $HOSPITALS; do
-    python analyze/aggregate_results.py     --results_root "$MEDREC" --hospitals "$H" --tasks med_rec --out_dir "$OUT/med_rec" --mas_budget 20 --baseline_budget 30
+    python analyze/aggregate_results.py     --results_root "$MEDREC" --hospitals "$H" --tasks med_rec --out_dir "$OUT/med_rec" --mas_budget 20 --baseline_budget 30 --methods $METHODS
   done
   if [[ -f "$MEDREC/anytime/anytime_selection_map.csv" ]]; then
-    python analyze/build_anytime_table.py        --results_root "$MEDREC" --anytime_dir "$MEDREC/anytime" --hospitals $HOSPITALS --tasks med_rec --out_dir "$OUT/med_rec"
-    python analyze/build_anytime_significance.py  --results_root "$MEDREC" --anytime_dir "$MEDREC/anytime" --hospitals $HOSPITALS --tasks med_rec --out_dir "$OUT/med_rec"
+    python analyze/build_anytime_table.py        --results_root "$MEDREC" --anytime_dir "$MEDREC/anytime" --hospitals $HOSPITALS --tasks med_rec --out_dir "$OUT/med_rec" --methods $METHODS
+    python analyze/build_anytime_significance.py  --results_root "$MEDREC" --anytime_dir "$MEDREC/anytime" --hospitals $HOSPITALS --tasks med_rec --out_dir "$OUT/med_rec" --methods $METHODS
   else
     echo "  (med_rec anytime skipped — run extract_anytime_jobs + submit_retest_medrec + build_anytime_table first)"
   fi
