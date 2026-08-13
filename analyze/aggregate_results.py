@@ -69,6 +69,8 @@ METHOD_DISPLAY = {
     "baseline2": "GENIUS",
     "baseline3": "LLMatic",
     "baseline4": "CoLLM-NAS",
+    "baseline5": "ENAS",
+    "baseline6": "TPE",
     "mas":             "ATHENA",
     "mas_layer1_only": "ATHENA (L1-only)",
     "mas_loto":        "ATHENA (LOTO)",

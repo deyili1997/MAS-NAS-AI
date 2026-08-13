@@ -13,7 +13,7 @@
 #SBATCH --error=/blue/mei.liu/lideyi/MAS-NAS/slurm_logs/%x_%j.err
 
 # Required env vars (via sbatch --export):
-#   BASELINE  ∈ {0,1,2,3,4}
+#   BASELINE  ∈ {0,1,2,3,4,5,6}   (5=ENAS/RL, 6=TPE/BO)
 #   TASK      ∈ {death, stay, readmission, next_diag_6m_pheno, next_diag_12m_pheno}
 #   SEED      ∈ {123, 456, 789, 1000, 1234}
 # Optional (default MIMIC-IV):
@@ -112,6 +112,8 @@ case $BL in
   4) python baselines/baseline4.py "${COMMON_ARGS[@]}" --budget $BUDGET \
         --model google/gemini-2.5-flash-lite \
         --navigator_temperature 0.7 --generator_temperature 0.7 --candidates_per_iter 3 ;;
+  5) python baselines/baseline5.py "${COMMON_ARGS[@]}" --budget $BUDGET ;;   # ENAS (RL controller)
+  6) python baselines/baseline6.py "${COMMON_ARGS[@]}" --budget $BUDGET ;;   # TPE (Bayesian optimization)
   mas) python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget $BUDGET ;;
   mas_loto) python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget $BUDGET --exclude_exact_task_from_history ;;
   mas_cold) python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget $BUDGET --no_history ;;

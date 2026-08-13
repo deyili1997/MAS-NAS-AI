@@ -28,7 +28,8 @@ import pandas as pd
 
 METHOD_DISPLAY = {
     "baseline0": "Random", "baseline1": "EA", "baseline2": "GENIUS",
-    "baseline3": "LLMatic", "baseline4": "CoLLM-NAS", "mas": "ATHENA",
+    "baseline3": "LLMatic", "baseline4": "CoLLM-NAS",
+    "baseline5": "ENAS", "baseline6": "TPE", "mas": "ATHENA",
 }
 METHOD_ORDER = ["baseline0", "baseline1", "baseline2", "baseline4", "mas"]  # baseline3 excluded by DEFAULT — override with --methods
 TASK_DISPLAY = {

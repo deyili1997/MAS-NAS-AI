@@ -50,7 +50,7 @@
 #       HOSPITALS (default: the 7 source sites, targets excluded)
 #
 #   MODE=search — one (method, seed) search cell (GPU):
-#     METHOD ∈ {0,1,2,3,4,mas,mas_loto,mas_cold,mas_layer1_only}
+#     METHOD ∈ {0,1,2,3,4,5,6,mas,mas_loto,mas_cold,mas_layer1_only}  (5=ENAS, 6=TPE)
 #     SEED   ∈ {111,123,456,789,999}
 #     HOSPITAL (default MIMIC-IV; use source_15 for the internal target)
 #     mas* additionally need MODE=prior to have completed. Baselines 0–4 do not.
@@ -221,6 +221,8 @@ case $METHOD in
   4) python baselines/baseline4.py "${COMMON_ARGS[@]}" --budget $BUDGET \
         --model google/gemini-2.5-flash-lite \
         --navigator_temperature 0.7 --generator_temperature 0.7 --candidates_per_iter 3 ;;
+  5) python baselines/baseline5.py "${COMMON_ARGS[@]}" --budget $BUDGET ;;   # ENAS (RL controller)
+  6) python baselines/baseline6.py "${COMMON_ARGS[@]}" --budget $BUDGET ;;   # TPE (Bayesian optimization)
   mas) python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget $BUDGET ;;
   mas_loto) python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget $BUDGET --exclude_exact_task_from_history ;;
   mas_cold) python mas_search.py "${COMMON_ARGS[@]}" "${MAS_EXTRA[@]}" --budget $BUDGET --no_history ;;

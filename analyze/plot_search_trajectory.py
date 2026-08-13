@@ -43,6 +43,8 @@ METHOD_DISPLAY = {
     "baseline2": "GENIUS",
     "baseline3": "LLMatic",
     "baseline4": "CoLLM-NAS",
+    "baseline5": "ENAS",
+    "baseline6": "TPE",
     "mas": "ATHENA",
 }
 METHOD_COLOR = {
@@ -51,6 +53,8 @@ METHOD_COLOR = {
     "baseline2": "#2E8B57",   # sea green
     "baseline3": "#1E90FF",   # dodger blue
     "baseline4": "#9370DB",   # purple
+    "baseline5": "#17BECF",   # cyan — ENAS (RL)
+    "baseline6": "#BCBD22",   # olive — TPE (BO)
     "mas":       "#DC143C",   # crimson — MAS stands out
 }
 METHOD_LINESTYLE = {
@@ -59,6 +63,8 @@ METHOD_LINESTYLE = {
     "baseline2": "--",
     "baseline3": "--",
     "baseline4": "--",
+    "baseline5": "--",
+    "baseline6": "--",
     "mas":       "-",
 }
 
