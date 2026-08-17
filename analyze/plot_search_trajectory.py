@@ -161,7 +161,7 @@ def plot_trajectory_panel(ax, records: dict, task: str, metric: str, max_iter_gl
             x, mean,
             color=METHOD_COLOR[method],
             linestyle=METHOD_LINESTYLE[method],
-            label=f"{METHOD_DISPLAY[method]} (n={method_max_iter})",
+            label=METHOD_DISPLAY[method],
             linewidth=2.0 if method == "mas" else 1.4,
             zorder=10 if method == "mas" else 5,
         )
