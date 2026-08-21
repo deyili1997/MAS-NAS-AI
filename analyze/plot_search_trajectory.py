@@ -131,9 +131,15 @@ def plot_trajectory_panel(ax, records: dict, task: str, metric: str, max_iter_gl
         if not seeds:
             continue
 
-        # Each method may have a different budget; pad shorter trajectories
-        # with NaN past their actual end so they don't artificially flatten
-        # the mean curve.
+        # Each method may have a different budget; seeds that terminate early
+        # (e.g. proposal saturation) are FORWARD-FILLED with their final
+        # best-so-far value (anytime semantics: once a search stops, its best
+        # remains its best). This keeps every seed in the mean at every budget,
+        # so the mean curve is monotone non-decreasing — matching the
+        # forward-fill convention of the anytime/efficiency tables
+        # (_cummax_by_seed in aggregate_results.py). NaN padding (previous
+        # behavior) let well-performing seeds drop out of the mean when they
+        # stopped early, producing visible dips in a "best so far" curve.
         per_seed_curves = []
         method_max_iter = 0
         for s in seeds:
@@ -148,10 +154,11 @@ def plot_trajectory_panel(ax, records: dict, task: str, metric: str, max_iter_gl
         if not per_seed_curves:
             continue
 
-        # Pad to method_max_iter
+        # Pad to method_max_iter with each seed's last best-so-far value
         padded = np.full((len(per_seed_curves), method_max_iter), np.nan)
         for i, c in enumerate(per_seed_curves):
             padded[i, :len(c)] = c
+            padded[i, len(c):] = c[-1]
 
         x = np.arange(1, method_max_iter + 1)
         mean = np.nanmean(padded, axis=0)
