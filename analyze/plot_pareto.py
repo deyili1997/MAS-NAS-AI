@@ -174,7 +174,7 @@ def plot_pareto_panel(ax, records: dict, task: str):
             if "num_params" not in df.columns or "val_auprc" not in df.columns:
                 continue
             params_all.extend(df["num_params"].dropna().values)
-            auprc_all.extend(df["val_auprc"].dropna().values)
+            auprc_all.extend(df["val_auprc"].dropna().values * 100.0)  # fraction → percent, matching the tables
 
         if not params_all:
             continue
@@ -209,7 +209,7 @@ def plot_pareto_panel(ax, records: dict, task: str):
             )
 
     ax.set_xlabel("# parameters (log scale)", fontsize=10)
-    ax.set_ylabel("Val AUPRC", fontsize=10)
+    ax.set_ylabel("Val AUPRC (%)", fontsize=10)
     ax.set_title(TASK_DISPLAY[task], fontsize=11)
     ax.set_xscale("log")
     # Human-readable ticks (0.5M, 1M, 3M, ...) on both decade and mid-decade

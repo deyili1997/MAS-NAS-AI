@@ -147,7 +147,7 @@ def plot_trajectory_panel(ax, records: dict, task: str, metric: str, max_iter_gl
             vals = df[metric].values
             if len(vals) == 0:
                 continue
-            curve = cumulative_max(vals)
+            curve = cumulative_max(vals) * 100.0   # fraction → percent, matching the tables
             method_max_iter = max(method_max_iter, len(curve))
             per_seed_curves.append(curve)
 
@@ -179,7 +179,7 @@ def plot_trajectory_panel(ax, records: dict, task: str, metric: str, max_iter_gl
             )
 
     ax.set_xlabel("# architectures evaluated", fontsize=10)
-    ax.set_ylabel(f"Best {metric.replace('val_', '').upper()} so far", fontsize=10)
+    ax.set_ylabel(f"Best val {metric.replace('val_', '').upper()} so far (%)", fontsize=10)
     ax.set_title(TASK_DISPLAY[task], fontsize=11)
     ax.grid(True, alpha=0.25)
     ax.legend(loc="lower right", fontsize=8, framealpha=0.85)
