@@ -68,12 +68,21 @@ set -euo pipefail
 
 # ---- hard-locked roots ------------------------------------------------------
 CANON_ROOT=/blue/mei.liu/lideyi/MAS-NAS/results            # read-only (supernet ckpt)
-MEDREC_ROOT=/blue/mei.liu/lideyi/MAS-NAS/results_medrec    # every write lands here
+# Default write root is the canonical med_rec store. MEDREC_ROOT may be
+# overridden via --export ONLY for isolated side analyses (e.g. the low-budget
+# scratch-equivalence proxy) so a rerun can NEVER overwrite the reported
+# results_medrec/ numbers. Guards below refuse results/ and require any
+# override to live under an explicitly separate directory.
+MEDREC_ROOT=${MEDREC_ROOT:-/blue/mei.liu/lideyi/MAS-NAS/results_medrec}
 TASK=med_rec                                               # not overridable — the whole point
 
 if [[ "$MEDREC_ROOT" == "$CANON_ROOT" ]]; then
     echo "FATAL: write root equals canonical root — refusing to run."; exit 1
 fi
+case "$MEDREC_ROOT" in
+  /blue/mei.liu/lideyi/MAS-NAS/results/*)
+    echo "FATAL: MEDREC_ROOT override points inside results/ — refusing to run."; exit 1 ;;
+esac
 
 MODE=${MODE:-search}
 HOSPITAL=${HOSPITAL:-MIMIC-IV}
